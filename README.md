@@ -1,51 +1,52 @@
 # Kasir Shanti
 
-Aplikasi kasir (POS) untuk Shanti Catering, ditambah perangkat parsing order
-WhatsApp. Dua bagian yang saling melengkapi dalam satu repo:
+The cashier (POS) app for Shanti Catering, plus the WhatsApp order parser. Two
+complementary parts in one repo:
 
-| Bagian | Isi |
+| Part | Contents |
 |---|---|
-| `src/`, `e2e/` | Aplikasi kasir — Vite + React 19 + TypeScript, data di Supabase |
-| `instruksi_ai_parser.md`, `scripts/`, `_forAI/`, `recognizer-kit/` | Parser order WhatsApp → CSV |
+| `src/`, `e2e/` | Cashier app — Vite + React 19 + TypeScript, data in Supabase |
+| `instruksi_ai_parser.md`, `scripts/`, `_forAI/`, `recognizer-kit/` | WhatsApp order → CSV parser |
 
-Keduanya gagal kalau dipisah: parser menghasilkan CSV yang harus bisa
-dibaca aplikasi, dan aplikasi butuh data customer yang sama dengan yang
-dipakai parser.
+They fail when separated: the parser produces CSV that the app must read, and the
+app needs the same customer data the parser uses.
+
+Start with [`AGENTS.md`](AGENTS.md) for working rules, then
+[`_forAI/README.md`](_forAI/README.md) for the parser side.
 
 ## Deploy
 
-Hosted di **Vercel** sebagai SPA statis. Repo ini **bukan** GitHub Pages —
-versi lama (vanilla JS + service worker) tetap di sana dan codebase-nya
-sudah tidak disentuh.
+Hosted on **Vercel** as a static SPA. This repo is **not** GitHub Pages — the old
+version (vanilla JS + service worker) stays there and its codebase is untouched.
 
-Setting yang wajib di Vercel:
+Required Vercel settings:
 
 ```
-Root Directory : /            (root repo — bukan subfolder)
+Root Directory : /            (repo root — not a subfolder)
 Build Command  : npm run build
 Output         : dist
 Branch         : feat/next-stack
 ```
 
-`vercel.json` berisi rewrite `/(.*)` → `/index.html`. Tanpa itu, `/kasir`
-yang dibuka langsung akan 404 — klik dari sidebar tetap jalan, jadi
-errornya mudah hilang saat testing manual.
+`vercel.json` rewrites `/(.*)` → `/index.html`. Without it, opening `/kasir`
+directly returns 404 — sidebar navigation still works, which makes the error easy
+to miss during manual testing.
 
-### Sebelum deploy: RLS Supabase
+### Before deploying: Supabase RLS
 
-Aplikasi ini **tidak punya login sama sekali**. Semua orang yang punya URL
-bisa membaca, mengubah, dan menghapus data.izu RLS di Supabase **wajib**
-ditutup sebelum aplikasi ini terbit publik — `DELETE /customers` dengan
-anon key akan menghapus seluruh data customer dan order.
+This app has **no authentication at all**. Anyone with the URL can read, change,
+and delete data. Closing Supabase RLS is **mandatory** before this goes public —
+`DELETE /customers` with the anon key wipes all customer and order data.
 
-Env opsional (`clients fallback ke nilai yang tertulis di `src/supabase/client.ts`):
+Optional env (clients fall back to the values inlined in
+`src/supabase/client.ts`):
 
 ```
 VITE_SUPABASE_URL
 VITE_SUPABASE_ANON_KEY
 ```
 
-## Menjalankan
+## Running
 
 ```bash
 npm install
@@ -54,78 +55,79 @@ npm run build
 npm run verify     # typecheck + unit + E2E
 ```
 
-Test:
+Tests:
 
 ```bash
 npm test           # 430 unit test
-npm run e2e        # 35 E2E + audit a11y
+npm run e2e        # 35 E2E + a11y audit
 ```
 
-E2E memakai `vite preview`, bukan dev server — supaya yang diuji adalah
-hasil build yang memang dilayani hosting, bukan perilaku HMR.
+E2E runs against `vite preview`, not the dev server, so what is tested is the
+build that hosting actually serves rather than HMR behaviour.
 
-## Data customer
+## Customer Data
 
-Parser membaca `customers.csv` sebagai referensi aktif. **File itu tidak
-ada di repo** — isinya 327 nama dan alamat customer sungguhan, jadi
-gitignored. Bentuk kolomnya ada di [`customers.csv.example`](customers.csv.example).
+The parser reads `customers.csv` as its active reference. **That file is not in
+the repo** — it holds 266 real customer names and addresses, so it is gitignored.
+Its column shape is in [`customers.csv.example`](customers.csv.example).
 
-Membuat ulang:
+Recreate it with:
 
 ```bash
-python3 update_customers_csv.py      # menarik dari Supabase → customers.csv
+python3 update_customers_csv.py      # Supabase → customers.csv
 ```
 
-Parsing rutin tidak boleh menjalankan sinkronisasi ini atau menunggu
-jaringan. Maintenance customer adalah pekerjaan terpisah.
+Routine parsing must not run this sync or wait for the network. Customer
+maintenance is separate work.
 
-## Parser order WhatsApp
+## WhatsApp Order Parser
 
-Aturan parsing ada di [`instruksi_ai_parser.md`](instruksi_ai_parser.md).
-Dokumen itu adalah sumber utama — dokumen lain mengikutinya, bukan
-menggantikannya.
+The parsing rules live in
+[`instruksi_ai_parser.md`](instruksi_ai_parser.md). That document is the primary
+source — other documents follow it, none replaces it.
 
-Agent yang mengerjakan parsing wajib membaca, dalam urutan ini:
+Anyone doing parsing must read, in this order:
 
-1. [`instruksi_ai_parser.md`](instruksi_ai_parser.md) — aturan utama
-2. [`_forAI/PARSER_RUNTIME_COMPACT.md`](_forAI/PARSER_RUNTIME_COMPACT.md) — ringkasan runtime
-3. [`_forAI/ORDER_PARSING_GUARDRAILS.md`](_forAI/ORDER_PARSING_GUARDRAILS.md) — checklist wajib
-4. `recognizer-kit/fixtures/evaluation-cases.md` — hanya untuk evaluasi recognizer
+1. [`instruksi_ai_parser.md`](instruksi_ai_parser.md) — the main rules
+2. [`_forAI/PARSER_RUNTIME_COMPACT.md`](_forAI/PARSER_RUNTIME_COMPACT.md) — runtime summary
+3. [`_forAI/ORDER_PARSING_GUARDRAILS.md`](_forAI/ORDER_PARSING_GUARDRAILS.md) — mandatory checklist
+4. `recognizer-kit/fixtures/evaluation-cases.md` — only for recognizer evaluation
 
-Prinsipnya: **Python menyaring, AI mengaudit.** Script lokal tidak boleh
-membaca chat mentah ke dalam konteks model.
+Principle: **Python filters, the AI audits.** Local scripts must not read raw
+chats into model context.
 
 ```bash
 python3 scripts/prepare_order_parse_context.py --help
 python3 scripts/allocate_limited_stock.py --help
 ```
 
-Hasilnya masuk ke `orderan/hasil-parser/<rentang>/` (gitignored) — file
-kandidat, bukan order final. Urutan `allocate_limited_stock.py` baru
-dipanggil setelah identitas, revisi, dan pembatalan AI selesai.
+Output lands in `orderan/hasil-parser/<date range>/` (gitignored) — those are
+candidate files, not final orders. `allocate_limited_stock.py` runs only after the
+AI has settled identities, revisions, and cancellations.
 
-File `Chat1.txt` / `Chat2.txt` juga gitignored: isinya percakapan pribadi
-customer dan hanya dipakai sebagai input lokal.
+`Chat1.txt` / `Chat2.txt` are gitignored too: they hold private customer
+conversations and are used only as local input.
 
-## Struktur
+## Structure
 
 ```
-src/                    aplikasi kasir
-e2e/                    E2E Playwright + audit a11y
-scripts/                script Python untuk parser
-_forAI/                 pengetahuan agent untuk parsing
-recognizer-kit/         tempat evaluasi recognizer
-legacy/                 dokumentasi stack lama — tidak Describes repo ini
-instruksi_ai_parser.md  aturan parsing utama
-update_customers_csv.py sinkronisasi customers.csv dari Supabase
-DESIGN.md               design system aplikasi
+AGENTS.md               repo working rules for agents
+src/                    cashier app
+e2e/                    Playwright E2E + a11y audit
+scripts/                Python scripts for the parser
+_forAI/                 agent knowledge for parsing
+recognizer-kit/         recognizer evaluation
+legacy/                 old stack documentation — does not describe this repo
+instruksi_ai_parser.md  primary parsing rules
+update_customers_csv.py sync customers.csv from Supabase
+DESIGN.md               app design system
 ```
 
-## Yang belum ada
+## Not Done Yet
 
-- **Belum ada autentikasi.** Lihat bagian RLS di atas.
-- **Belum ada test parsing.** 430 unit test yang ada semuanya logika
-  aplikasi; `prepare_order_parse_context.py` belum punya test.
-- **`legacy/PROJECT_TECHNICAL_CONTEXT.md` menjelaskan stack lama**
-  (`server.py`, SQLite, `script.js`) dan tidak menggambarkan repo ini.
-  Dipakai sebagai rujukan historis saja.
+- **No authentication.** See the RLS section above.
+- **No parser tests.** All 430 unit tests cover app logic;
+  `prepare_order_parse_context.py` has none.
+- **`legacy/PROJECT_TECHNICAL_CONTEXT.md` describes the old stack**
+  (`server.py`, SQLite, `script.js`) and does not describe this repo. Use it as a
+  historical reference only.

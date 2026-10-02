@@ -1,42 +1,52 @@
 # Output Contract
 
-## Input Minimum
+## Minimum Input
 
-Recognizer menerima:
+The recognizer receives:
 
-- Menu hari ini, termasuk nama resmi item dan harga bila tersedia.
-- Sumber order yang dibatasi pengguna: teks WhatsApp, screenshot, atau file chat yang secara eksplisit diminta.
-- Rentang waktu bila order perlu difilter.
-- Informasi stok khusus bila ada.
+- Today's menu, including official item names and prices when available.
+- The user-bounded order sources: WhatsApp text, screenshots, or chat files that
+  were explicitly requested.
+- A time range when orders need filtering.
+- Specific stock information when it exists.
 
-Gunakan `instruksi_ai_parser.md` untuk aturan parsing dan `customers.csv` untuk mapping customer, alias, tag, serta ongkir. Snapshot customer dipakai langsung; jangan melakukan sync jaringan sebagai bagian dari parsing rutin.
+Use `instruksi_ai_parser.md` for parsing rules and `customers.csv` for customer,
+alias, tag, and shipping mapping. The customer snapshot is used directly; never
+run a network sync as part of routine parsing.
 
-## Skema CSV
+## CSV Schema
 
-| Kolom | Isi |
+| Column | Content |
 | --- | --- |
-| `customer` | Nama customer resmi/aman beserta alamat sesuai aturan mapping. |
-| `chatDate` | Timestamp chat: `dd/mm/yyyy HH.MM.SS`. |
-| `payment` | Kosong secara default. |
-| `ongkir` | Bilangan rupiah tanpa `Rp` dan tanpa titik. |
-| `item` | Nama menu resmi, persis sama dengan menu hari ini. |
-| `quantity` | Bilangan jumlah order/porsi. |
-| `harga` | Harga custom hanya bila ada; kosong untuk harga menu normal. |
-| `note` | Catatan dapur yang hanya berlaku pada item di baris itu. |
-| `sendNote` | Instruksi pengiriman/pickup yang berlaku untuk seluruh order customer itu. |
+| `customer` | Official/safe customer name including address, per the mapping rules. |
+| `chatDate` | Chat timestamp: `dd/mm/yyyy HH.MM.SS`. |
+| `payment` | Empty by default. |
+| `ongkir` | Rupiah number without `Rp` and without dots. |
+| `item` | Official menu name, exactly the same as today's menu. |
+| `quantity` | Numeric order/portion count. |
+| `harga` | Custom price only when it exists; empty for a normal menu price. |
+| `note` | Kitchen note that applies only to the item on that row. |
+| `sendNote` | Delivery/pickup instruction that applies to the whole customer order. |
 
-## Validasi Sebelum Mengirim
+Values stay Indonesian and verbatim; only the surrounding explanation is
+English.
 
-1. Header hanya sekali dan berurutan persis seperti kontrak.
-2. Semua order berada dalam rentang waktu yang diminta.
-3. Item hasil match memakai casing dan ejaan menu hari ini secara persis.
-4. Tidak ada alamat/keterangan kurir yang tertinggal di `note`.
-5. Tidak ada instruksi dapur yang bocor ke `sendNote`.
-6. Jika item sama memiliki note berbeda, setiap variasi memiliki baris sendiri.
-7. Tidak ada order ganda dari pesan kirim ulang tanpa penambahan.
-8. Kelompok order tersusun paling lama ke terbaru; timestamp kosong berada paling akhir dan diberi laporan review.
-9. Bila stok terbatas, item yang tidak kebagian tidak dimasukkan ke CSV dan dicantumkan di laporan terpisah bila diminta.
+## Validation Before Sending
 
-## Escape CSV
+1. The header appears once and in exactly the contract order.
+2. All orders fall inside the requested time range.
+3. Matched items use the exact casing and spelling of today's menu.
+4. No address or courier wording is left in `note`.
+5. No kitchen instruction leaks into `sendNote`.
+6. If the same item has different notes, each variation has its own row.
+7. There is no duplicate order from a resend without an addition.
+8. Order groups run oldest to newest; empty timestamps go last and are reported
+   in the review.
+9. With limited stock, unfulfilled items are not added to the CSV and are listed
+   in a separate report when requested.
 
-Gunakan nilai kosong untuk data yang tidak ada. Jika suatu nilai mengandung koma, tanda kutip, atau baris baru, kutip nilai tersebut dengan format CSV standar. Untuk `note` dan `sendNote`, lebih baik normalisasikan koma menjadi titik koma sesuai instruksi utama.
+## CSV Escaping
+
+Use an empty value for missing data. If a value contains a comma, a quote, or a
+newline, quote it using standard CSV format. For `note` and `sendNote`, prefer
+normalizing commas into semicolons per the main instructions.

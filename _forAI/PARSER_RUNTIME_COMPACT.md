@@ -3,6 +3,10 @@
 Use this file during routine parsing. `instruksi_ai_parser.md` remains the full
 business-rule source of truth when a case is not covered here.
 
+Prose and review reports are English. CSV output is Indonesian and verbatim:
+menu names, `note`, `sendNote`, customer names, addresses, `[PERLU REVIEW]`, and
+the CSV header are never translated.
+
 ## One-Prompt Input
 
 The user only needs to provide:

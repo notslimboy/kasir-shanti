@@ -25,7 +25,7 @@ blob-report/
 #  DATA SENSITIF — JANGAN PERNAH DI-PUSH
 # ─────────────────────────────────────────────────────────────────────
 
-# 327 nama + alamat customer sungguhan. Parser membacanya sebagai
+# 266 nama + alamat customer sungguhan. Parser membacanya sebagai
 # referensi aktif, tapi isinya data pribadi orang. Bentuk kolomnya ada
 # di `customers.csv.example`; file aslinya dibuat dengan:
 #     python3 update_customers_csv.py

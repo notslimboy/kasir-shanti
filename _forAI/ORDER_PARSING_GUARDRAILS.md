@@ -2,9 +2,28 @@
 
 This is the operating checklist for every AI or subagent that parses Shanti Catering WhatsApp orders. Read this before touching an order CSV. Business rules live in `../instruksi_ai_parser.md`; the active structured customer reference is `../customers.csv`.
 
+Work in English. Emit CSV in Indonesian: menu names, `note`, `sendNote`, customer names, and addresses stay exactly as the source wrote them, and literal tokens such as `[PERLU REVIEW]` or `UNIQUE_STRICT_MATCH_AI_CONFIRM` are never reworded.
+
 ## 0. Repository Tooling Preflight
 
-Before parsing, inspect `../scripts/`, this `_forAI/` folder, and `../orderan/` read-only. The required pipeline is Python first, AI second: Python reads the complete exports and performs exact-range filtering, merging, deduplication, customer lookup, and candidate extraction; AI reads the compact generated evidence, audits ambiguity, and produces the final CSV. Never load complete `Chat1.txt` or `Chat2.txt` into model context. Read the existing `../customers.csv` snapshot immediately; routine parsing must not contact Supabase or wait for a customer refresh. Run `../update_customers_csv.py` separately only as scheduled maintenance or when the user explicitly requests fresh customer data. `customers.csv` is the active structured authority for canonical names, aliases, tags, and ongkir. Use `customer-terdeteksi.csv` to audit the strict match for every sender that has item candidates, and use `../kasir-bento.sqlite3` only for selective unresolved lookup. Do not run `match_draft_to_db.js` automatically because it may call Supabase and write output. Use a short-lived `scratch/` helper only when deterministic range filtering, CSV validation, stock reconciliation, or database lookup needs it; keep source/target CSV reads read-only until final QA, use Python `csv` for CSV output, and never delete user files.
+Before parsing, inspect `../scripts/`, this `_forAI/` folder, and `../orderan/` read-only. The required pipeline is Python first, AI second: Python reads the complete exports and performs exact-range filtering, merging, deduplication, customer lookup, and candidate extraction; AI reads the compact generated evidence, audits ambiguity, and produces the final CSV. Never load complete `Chat1.txt` or `Chat2.txt` into model context. Read the existing `../customers.csv` snapshot immediately; routine parsing must not contact Supabase or wait for a customer refresh. Run `../update_customers_csv.py` separately only as scheduled maintenance or when the user explicitly requests fresh customer data. `customers.csv` is the active structured authority for canonical names, aliases, tags, and ongkir. Use `customer-terdeteksi.csv` to audit the strict match for every sender that has item candidates.
+
+Lookup tools available in this repo, in order of preference:
+
+1. `customers.csv` — read it first; it resolves almost every identity.
+2. `../menu-harian.csv` — menu/alias lookup, same columns as the old
+   `clean_menu_sheet.csv`. Duplicate normalized names abort the preparation
+   script, so merge them and keep the alternate spelling in `alias`.
+3. A short-lived `scratch/` helper when deterministic range filtering, CSV
+   validation, or stock reconciliation needs it.
+4. A read-only Supabase query through `../src/supabase/client.ts` only when the
+   identity genuinely cannot be resolved locally, and only with an explicit
+   `select`. Never write through that path.
+
+The old `kasir-bento.sqlite3` snapshot and `match_draft_to_db.js` do not exist
+here; the previous stack is documented in `../legacy/PROJECT_TECHNICAL_CONTEXT.md`
+for historical reference only. Keep source/target CSV reads read-only until
+final QA, use Python `csv` for CSV output, and never delete user files.
 
 ## 1. Scope Contract Before Work
 

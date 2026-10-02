@@ -1,8 +1,10 @@
 # Evaluation Cases
 
-Gunakan kasus sintetis ini untuk membandingkan AI tujuan sebelum ia mengolah order asli. Nama menu di bawah dianggap sebagai menu hari ini.
+Use these synthetic cases to compare a target AI before it processes real
+orders. The menu names below are treated as today's menu. Chat input and CSV
+values stay Indonesian; the expectations are written in English.
 
-## Kasus 1: Pisahkan Note Dapur dan Send Note
+## Case 1: Separate Kitchen Note From Send Note
 
 **Input**
 
@@ -13,7 +15,7 @@ Tahu Kocek 1 pedas dikit tanpa kubis
 Kirim ke Direktorat ITS
 ```
 
-**Ekspektasi penting**
+**Key expectation**
 
 ```csv
 customer,chatDate,payment,ongkir,item,quantity,harga,note,sendNote
@@ -21,9 +23,10 @@ Kirana 4,20/07/2026 05.20.00,,0,Tahu Kocek,1,,pedas sedang,kirim ke Direktorat I
 Kirana 4,20/07/2026 05.20.00,,0,Tahu Kocek,1,,pedas dikit tanpa kubis,kirim ke Direktorat ITS
 ```
 
-Dua variasi tidak boleh digabung. `Kirim ke Direktorat ITS` tidak boleh masuk ke `note`.
+The two variations must not be merged. `Kirim ke Direktorat ITS` must not enter
+`note`.
 
-## Kasus 2: Pickup Adalah Send Note
+## Case 2: Pickup Is a Send Note
 
 **Input**
 
@@ -34,7 +37,7 @@ Kolak 1
 Diambil gojek
 ```
 
-**Ekspektasi penting**
+**Key expectation**
 
 ```csv
 customer,chatDate,payment,ongkir,item,quantity,harga,note,sendNote
@@ -42,9 +45,9 @@ Raka 22,20/07/2026 06.10.00,,0,Buntil,2,,,diambil gojek
 Raka 22,20/07/2026 06.10.00,,0,Kolak,1,,,diambil gojek
 ```
 
-## Kasus 3: Paket Menu Bukan Kuantitas
+## Case 3: A Package Suffix Is Not a Quantity
 
-**Menu hari ini**: `Sate Usus / 3`
+**Today's menu**: `Sate Usus / 3`
 
 **Input**
 
@@ -53,16 +56,17 @@ Sari 8, 20/07/2026 06.30
 Sate usus 2
 ```
 
-**Ekspektasi penting**
+**Key expectation**
 
 ```csv
 customer,chatDate,payment,ongkir,item,quantity,harga,note,sendNote
 Sari 8,20/07/2026 06.30.00,,0,Sate Usus / 3,2,,,
 ```
 
-Jumlah tetap `2`, bukan `6`; suffix `/ 3` wajib dipertahankan pada nama item.
+Quantity stays `2`, not `6`; the `/ 3` suffix must be preserved in the item
+name.
 
-## Kasus 4: Tambahan Bukan Duplikasi
+## Case 4: An Addition Is Not a Duplicate
 
 **Input**
 
@@ -74,16 +78,16 @@ Nara 11, 20/07/2026 06.00
 Tambah kolak 2
 ```
 
-**Ekspektasi penting**
+**Key expectation**
 
 ```csv
 customer,chatDate,payment,ongkir,item,quantity,harga,note,sendNote
 Nara 11,20/07/2026 06.00.00,,0,Kolak,3,,,
 ```
 
-Timestamp order gabungan memakai pesan tambahan paling akhir.
+The merged order timestamp uses the latest addition message.
 
-## Kasus 5: Resend Tidak Boleh Menggandakan
+## Case 5: A Resend Must Not Double
 
 **Input**
 
@@ -95,8 +99,10 @@ Reni 5, 20/07/2026 06.00
 Pepes Bandeng 1
 ```
 
-**Ekspektasi penting**: hanya satu baris `Pepes Bandeng` jumlah `1`, dengan timestamp `20/07/2026 06.00.00`.
+**Key expectation**: exactly one `Pepes Bandeng` row with quantity `1`, using
+timestamp `20/07/2026 06.00.00`.
 
-## Kasus 6: Urutan CSV
+## Case 6: CSV Ordering
 
-Order `20/07/2026 19.10` harus berada di atas order `21/07/2026 05.30`. Jangan mengurutkan berdasarkan nama customer atau berdasarkan posisi screenshot.
+An order at `20/07/2026 19.10` must sit above an order at
+`21/07/2026 05.30`. Never sort by customer name or by screenshot position.
