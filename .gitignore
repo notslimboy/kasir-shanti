@@ -1,0 +1,60 @@
+node_modules/
+dist/
+*.tsbuildinfo
+.DS_Store
+
+# Hasil emit `tsc -b` ke dalam src/ — artefak compiler, bukan source.
+# Tanpa aturan ini file .js hasil build ikut hilang saat `git clean`.
+src/**/*.js
+src/**/*.d.ts
+src/**/*.js.map
+
+# screenshot debug — jangan di-commit
+*.png
+!design/reference.png
+!public/*.png
+
+# Artefak Playwright — trace kegagalan berisi snapshot seluruh DOM,
+# termasuk data yang tampil di layar. Jangan masuk repo.
+test-results/
+playwright-report/
+blob-report/
+.playwright/
+
+# ─────────────────────────────────────────────────────────────────────
+#  DATA SENSITIF — JANGAN PERNAH DI-PUSH
+# ─────────────────────────────────────────────────────────────────────
+
+# 327 nama + alamat customer sungguhan. Parser membacanya sebagai
+# referensi aktif, tapi isinya data pribadi orang. Bentuk kolomnya ada
+# di `customers.csv.example`; file aslinya dibuat dengan:
+#     python3 update_customers_csv.py
+customers.csv
+untagged-customers*.csv
+backups/
+
+# Chat WhatsApp mentah. Isinya percakapan pribadi customer, hundreds KB,
+# dan hanya dipakai sebagai input lokal saat parsing — bukan bagian repo.
+Chat*.txt
+_chat*.txt
+orderan/
+scratch/
+
+# Snapshot database lokal
+*.sqlite3
+*.db
+
+# Order yang sudah diekspor
+orders_*.csv
+sales_*.csv
+clean_menu_sheet.csv
+
+# Python
+__pycache__/
+*.py[cod]
+.venv*/
+
+# Credentials
+.env
+.env.*
+!.env.example

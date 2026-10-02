@@ -1,0 +1,11 @@
+customer,chatDate,payment,ongkir,item,quantity,note,sendNote
+"Bu Ani - Jl Melati 12","28/5/2026 10.15","Tunai",10000,"Nasi Goreng Rumahan",20,"sambal pisah untuk 5 porsi","kirim ke pos satpam"
+"Bu Ani - Jl Melati 12","28/5/2026 10.15","Tunai",10000,"Nasi Goreng Seafood",5,"tidak pedas","kirim ke pos satpam"
+"Pak Budi - Jl Kenanga 8","28/5/2026 12.03","Transfer",15000,"Nasi Goreng Jawa",10,"tidak pakai udang",""
+"Pak Budi - Jl Kenanga 8","28/5/2026 12.03","Transfer",15000,"Nasi Goreng Kampung",8,"pedas sedang",""
+"Mbak Rina - Perum Griya Asri Blok C7","28/5/2026 13.20","Tunai",12000,"Nasi Goreng Solaria",15,"sendok plastik",""
+"Mbak Rina - Perum Griya Asri Blok C7","28/5/2026 13.20","Tunai",12000,"Nasi Goreng Rumahan",10,"tidak pakai acar",""
+"Bu Sari - Jl Mawar No 21","28/5/2026 14.05","Transfer",8000,"Nasi Goreng Jawa",12,"pedas",""
+"Bu Sari - Jl Mawar No 21","28/5/2026 14.05","Transfer",8000,"Nasi Goreng Seafood",6,"tanpa seafood cumi",""
+"Pak Dimas - Ruko Sentra Kuliner Unit 4","28/5/2026 15.12","QRIS",20000,"Nasi Goreng Kampung",25,"sambal terpisah",""
+"Pak Dimas - Ruko Sentra Kuliner Unit 4","28/5/2026 15.12","QRIS",20000,"Nasi Goreng Solaria",10,"extra telur",""
