@@ -1,5 +1,7 @@
 import { expect, test, type Page } from "@playwright/test";
 
+import { pakaiSupabasePalsu } from "./fixture-supabase";
+
 /* Analisis axe dilakukan lewat `page.evaluate` dengan `axe.run(document)`,
    bukan lewat `AxeBuilder` dari @axe-core/playwright.
 
@@ -55,6 +57,10 @@ test.describe("a11y", () => {
     test(`${path} tidak punya pelanggaran kritis`, async ({ page }) => {
       test.setTimeout(60_000);
 
+      /* Fixture, bukan database produksi: dengan RLS ditutup, publishable key
+         tidak bisa membaca apa pun, jadi halaman-halaman ini akan kosong dan
+         analisis axe-nya jadi tidak berarti. */
+      await pakaiSupabasePalsu(page);
       await page.goto(path);
       /* `networkidle` dipakai, bukan `domcontentloaded`: layout butuh
          selesai dirender supaya yang dianalisis bukan halaman kosong. */

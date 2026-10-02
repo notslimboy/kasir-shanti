@@ -206,8 +206,11 @@ The script is a filter, not a parser. The AI is the parser.
 
 ## Known Limits
 
-- The app has no authentication. Close Supabase RLS before any public deploy —
-  `DELETE /customers` with the anon key wipes all customer and order data.
+- Auth exists but is deliberately coarse: one shared account, so a leaked
+  password exposes everything and no sale can be attributed to a person.
+  Fine at this size; revisit if staff who must not see financials appear.
+- The Playwright suite runs with sign-in bypassed and therefore with an empty
+  dataset — it asserts empty-state behaviour, never live numbers.
 - `prepare_order_parse_context.py` has no tests. All 430 unit tests cover app
   logic only.
 - `legacy/PROJECT_TECHNICAL_CONTEXT.md` describes the old stack (`server.py`,
@@ -244,15 +247,40 @@ VITE_SUPABASE_URL
 VITE_SUPABASE_ANON_KEY
 ```
 
+## Auth
+
+There is no anonymous access. Supabase Auth gates the app, RLS grants
+everything to `authenticated` and nothing to `anon`, and `headerRest()` sends
+the signed-in user's JWT so the raw REST calls pass the same policies.
+
+- One shared account for the owner and the admins. No roles, by agreement.
+- `src/lib/auth.tsx` owns session state. `App.tsx` renders `MasukPage` until a
+  session exists, and `DataProvider` mounts **inside** that gate — move it out
+  and the first fetches go out unauthenticated and every page shows an empty
+  menu.
+- The publishable key in `src/supabase/client.ts` is not a secret and must not
+  be treated as one. RLS is the entire security boundary.
+- `VITE_E2E_AUTH_BYPASS` is honoured only on localhost, so it cannot open up a
+  real deployment. Playwright builds with it set.
+- `update_customers_csv.py` and `scripts/tag_customer_supabase.py` cannot use a
+  browser session; they read a service-role key from `SUPABASE_KEY`.
+
+Setup, rollback and verification: `docs/supabase-access.md`.
+SQL: `supabase/migrations/`.
+
 ## Structure
 
 ```
-src/app/            React entry
+src/app/            React entry + auth gate
 src/pages/          beranda, kasir, menu, penjualan, piutang, customer,
-                    impor-pesanan, pengaturan
+                    impor-pesanan, pengaturan, masuk
 src/components/     UI components (shadcn-style plus the Shanti kit)
 src/lib/            domain logic — impor-pesanan, struk, pricing, sync, and so on
 src/supabase/       client + types
+supabase/migrations/  RLS and auth SQL. JALANKAN-INI.sql is the one to
+                    paste; the numbered files are its parts, kept separate
+                    for review
+docs/               setup guides
 scripts/            Python scripts for the parser
 _forAI/             agent knowledge for parsing
 recognizer-kit/     recognizer evaluation
@@ -263,6 +291,15 @@ legacy/             old stack documentation — does not describe this repo
 
 - `src/lib/*.ts` holds pure logic with a colocated `*.test.ts`;
   `src/pages/*.tsx` and `src/components/*.tsx` hold UI only.
+- `npm run typecheck` is plain `tsc -b`. Do not add `--noEmit false`: it
+  overrides `noEmit: true` and emits JS into `src/`, where vitest then picks
+  up every `*.test.ts` a second time as a stale `.js` twin — the suite
+  reports double the tests and none of the failures are real.
+- E2E specs that need data use `pakaiSupabasePalsu` from
+  `e2e/fixture-supabase.ts`. Nothing in `e2e/` may read the live database:
+  after the RLS lockdown the publishable key gets nothing, so such a spec
+  passes on an open database and fails on a secured one — the deploy gate
+  would break the build that makes the database safe.
 - CSV import and order grouping follow the old Bulk Input
   (`groupKey = customer|chatDate|payment|shipping`). Do not change the 9-column
   format.
@@ -274,6 +311,10 @@ legacy/             old stack documentation — does not describe this repo
 
 ## Deploy Gate
 
-1. Supabase RLS closed (no anonymous write/delete).
+1. Supabase RLS closed — `supabase/migrations/JALANKAN-INI.sql` applied, and
+   the `curl` check in `docs/supabase-access.md` returns `401`.
 2. `npm run verify` green.
 3. `git status` free of sensitive files.
+4. No Supabase key in the deployed bundle except the publishable one. The
+   publishable key is meant to be public; `sb_secret_` in `dist/` is a
+   credential leak.

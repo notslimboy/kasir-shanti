@@ -58,3 +58,15 @@ __pycache__/
 .env
 .env.*
 !.env.example
+
+# Workspace agen — bukan bagian repo
+.opencode/
+
+# Vercel CLI: project linkage + token lokal
+.vercel/
+
+# `vercel link` menambahkan `.env*` sendiri di baris paling akhir, dan aturan
+# terakhir yang menang — itu membuat `!.env.example` di atas ikut mati, jadi
+# contoh konfigurasi berhenti ikut repo. Negasi diulang di sini, setelahnya.
+.env*
+!.env.example

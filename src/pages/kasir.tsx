@@ -826,6 +826,13 @@ export function KasirPage() {
                         return (
                           <li key={v.name}>
                             <motion.button
+                              /* Hook untuk E2E. Selector lama `li button`
+                                 ikut mengenai filter kategori di sidebar,
+                                 jadi test pernah mengklik chip filter
+                                 alih-alih varian — dan lalu melompat
+                                 `test.skip` tanpa satu pun assertion
+                                 dijalankan. */
+                              data-variant-add={v.name}
                               onClick={() => add(m.id, v.name)}
                               whileTap={{ scale: 0.97 }}
                               className={

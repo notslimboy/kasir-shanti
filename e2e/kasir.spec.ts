@@ -1,11 +1,14 @@
 import { expect, test } from "@playwright/test";
 
+import { VARIAN_CUSTOM, VARIAN_PILIH, pakaiSupabasePalsu } from "./fixture-supabase";
+
 /* Alur kasir.
 
    Katalog asli butuh Supabase dan Angkanya milik pelanggan sungguhan, jadi
-   test ini TIDAK memakai data nyata. Yang diuji di sini adalah mekanisme
-   yang menjaga kasir dari salah input — bagian yang kalau rusak, transaksi
-   jadi benar dengan cara yang salah.
+   test ini TIDAK memakai data nyata. Sekarang data datang dari fixture di
+   `fixture-supabase.ts`. Yang diuji di sini adalah mekanisme yang menjaga
+   kasir dari salah input — bagian yang kalau rusak, transaksi jadi benar
+   dengan cara yang salah.
 
    Yang dijaga:
    - keranjang benar-benar kosong di awal (bukan sisa order sebelumnya)
@@ -13,21 +16,26 @@ import { expect, test } from "@playwright/test";
    - pencarian tidak pernah menampilkan "produk" fiktif
    - kuantitas naik/turun benar-benar mengubah subtotal
 
-   Kalau katalog tidak termuat, test dilewati secara eksplisit — bukan
-   lolos hampa. Diam-diam hijau tanpa menguji apa pun adalah kegagalan
-   yang lebih buruk daripada gagal. */
+   Katalog selalu ada karena fixture-nya, jadi tidak ada lagi test yang
+   dilewati diam-diam. Sebelumnya katalog kosong berarti separuh test di file
+   ini tidak teruji sama sekali, dan tidak ada yang tahu. */
 
 test.beforeEach(async ({ page }) => {
+  await pakaiSupabasePalsu(page);
   await page.goto("/kasir");
 });
 
 async function katalogSiap(page: import("@playwright/test").Page) {
   await page.waitForLoadState("networkidle");
-  const cari = page.getByPlaceholder("Cari menu atau SKU…");
-  const kosong = page.getByText(/Belum ada menu|Menu belum dimuat|Tambah menu dulu/);
-  if ((await kosong.count()) > 0) return false;
-  await expect(cari).toBeVisible();
-  return true;
+  await expect(page.getByPlaceholder("Cari menu atau SKU…")).toBeVisible();
+  /* Dulu fungsi ini mengembalikan `false` dan test-nya di-skip kalau katalog
+     kosong. Sekarang itu jadi assertion yang gagal: katalog datang dari
+     fixture, jadi kosong berarti ada bug, bukan kondisi yang perlu dilewati.
+     Skip di sini berarti test hijau tanpa menguji apa pun. */
+  await expect(
+    page.getByText(/Belum ada menu|Menu belum dimuat|Tambah menu dulu/),
+    "katalog dari fixture tidak termuat — test sisanya tidak akan menguji apa pun",
+  ).toHaveCount(0);
 }
 
 test("keranjang mulai kosong dan tombol bayar mati", async ({ page }) => {
@@ -66,7 +74,7 @@ test("keranjang kosong tidak diam-diam menampilkan ongkir", async ({ page }) => 
 });
 
 test("mencari menu tidak pernah memunculkan produk fiktif", async ({ page }) => {
-  if (!(await katalogSiap(page))) test.skip(true, "katalog kosong — lihat test katalog");
+  await katalogSiap(page);
 
   const cari = page.getByPlaceholder("Cari menu atau SKU…");
 
@@ -79,18 +87,19 @@ test("mencari menu tidak pernah memunculkan produk fiktif", async ({ page }) => 
 });
 
 test("tambah dan kurangi item mengubah subtotal", async ({ page }) => {
-  if (!(await katalogSiap(page))) test.skip(true, "katalog kosong — lihat test katalog");
+  await katalogSiap(page);
 
   const cari = page.getByPlaceholder("Cari menu atau SKU…");
-  // Ambil satu kartu pertama yang punya varian untuk diklik.
   await cari.fill("a");
   await page.waitForTimeout(500);
 
-  const item = page.locator('[data-cart-item]');
-  if ((await item.count()) === 0) test.skip(true, "tidak ada item yang bisa diklik");
+  const item = page.locator("[data-cart-item]");
 
-  await page.locator("li button").filter({ hasText: /.+/ }).first().click();
-  await expect(item.first()).toBeVisible();
+  await page.locator(`[data-variant-add="${VARIAN_PILIH}"]`).first().click();
+  await expect(
+    item.first(),
+    "klik varian tidak menambah apa pun ke keranjang",
+  ).toBeVisible();
 
   // Kuantitas 1 → 2 harus menaikkan total baris itu.
   const totalBaris = item.first().locator(".text-sm.font-bold.figure");
@@ -110,15 +119,14 @@ test("tambah dan kurangi item mengubah subtotal", async ({ page }) => {
 });
 
 test("kosongkan keranjang mengembalikan keadaan awal", async ({ page }) => {
-  if (!(await katalogSiap(page))) test.skip(true, "katalog kosong — lihat test katalog");
+  await katalogSiap(page);
 
   const cari = page.getByPlaceholder("Cari menu atau SKU…");
   await cari.fill("a");
   await page.waitForTimeout(500);
-  const item = page.locator('[data-cart-item]');
-  if ((await item.count()) === 0) test.skip(true, "tidak ada item yang bisa diklik");
+  const item = page.locator("[data-cart-item]");
 
-  await page.locator("li button").filter({ hasText: /.+/ }).first().click();
+  await page.locator(`[data-variant-add="${VARIAN_PILIH}"]`).first().click();
   await expect(item.first()).toBeVisible();
 
   await page.getByRole("button", { name: "Kosongkan" }).click();
@@ -127,30 +135,44 @@ test("kosongkan keranjang mengembalikan keadaan awal", async ({ page }) => {
 });
 
 test("baris custom tanpa harga tidak bisa dibayar", async ({ page }) => {
-  if (!(await katalogSiap(page))) test.skip(true, "katalog kosong — lihat test katalog");
+  await katalogSiap(page);
 
   const cari = page.getByPlaceholder("Cari menu atau SKU…");
   await cari.fill("a");
   await page.waitForTimeout(500);
 
-  // Baris custom selalu punya input "isi harga" (kasir.tsx:445).
-  const hargaKosong = page.getByPlaceholder("isi harga");
-  if ((await hargaKosong.count()) === 0) test.skip(true, "tidak ada varian custom di katalog ini");
+  /* Baris custom baru ADA kalau varian custom-nya diklik lebih dulu.
+     Versi spec ini sebelumnya hanya mencari input "isi harga" tanpa
+     pernah mengklik apa pun, jadi selalu kosong dan selalu di-skip —
+     guard yang delighted menguji tidak ada apa pun. */
+  await page.locator(`[data-variant-add="${VARIAN_CUSTOM}"]`).first().click();
 
-  await page.getByRole("button", { name: /Isi harga custom dulu/ }).click();
-  await expect(page.getByRole("button", { name: /Isi harga custom dulu/ })).toBeDisabled();
+  const hargaKosong = page.getByPlaceholder("isi harga");
+  await expect(
+    hargaKosong.first(),
+    "varian custom tidak menghasilkan input harga di keranjang",
+  ).toBeVisible();
+
+  /* Two assertions instead of a click. The pay button is disabled *by
+     design* here — clicking it just hangs on a permanently-disabled
+     element, so the old spec hung until timeout with a message that
+     explained nothing. What matters is the guard, not the click. */
+  const bayar = page.getByRole("button", { name: "Isi harga custom dulu" });
+  await expect(
+    bayar,
+    "tombol bayar tidak berubah jadi 'Isi harga custom dulu' — transaksi tanpa harga bisa diselesaikan",
+  ).toBeDisabled();
 });
 
 test("nominal uang diformat dalam Rupiah", async ({ page }) => {
-  if (!(await katalogSiap(page))) test.skip(true, "katalog kosong — lihat test katalog");
+  await katalogSiap(page);
 
   const cari = page.getByPlaceholder("Cari menu atau SKU…");
   await cari.fill("a");
   await page.waitForTimeout(500);
-  const item = page.locator('[data-cart-item]');
-  if ((await item.count()) === 0) test.skip(true, "tidak ada item yang bisa diklik");
+  const item = page.locator("[data-cart-item]");
 
-  await page.locator("li button").filter({ hasText: /.+/ }).first().click();
+  await page.locator(`[data-variant-add="${VARIAN_PILIH}"]`).first().click();
   await expect(item.first()).toBeVisible();
 
   // Kasir Indonesia salah baca "25000" sebagai dua ratus lima ribu.

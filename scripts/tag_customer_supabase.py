@@ -5,40 +5,54 @@ Hanya mengisi `tag` yang NULL/kosong. TIDAK menghapus, TIDAK mengganti nama,
 TIDAK menyentuh sales. Kalau Rules tidak bisa menebak, tag dibiarkan kosong
 dan dilaporkan — menebak salah area lebih buruk daripada kosong.
 
+Butuh kredensial nyata; publishable key sudah tidak bisa menulis karena RLS
+ditutup:
+
+    export SUPABASE_KEY=sb_secret_...   # service_role
+
 Jalankan:
     python3 scripts/tag_customer_supabase.py          # dry-run, tidak menulis
     python3 scripts/tag_customer_supabase.py --tulis  # benar-benar menulis
 """
 import argparse
 import json
+import os
 import sys
 import urllib.error
 import urllib.request
 from collections import Counter
 
 sys.path.insert(0, ".")
-from update_customers_csv import infer_customer_address_tag, normalize_customer_tag
+from update_customers_csv import infer_customer_address_tag, normalize_customer_tag, supabase_key
 
-SUPABASE_URL = "https://ddfalsclevkqhiyojngx.supabase.co"
-SUPABASE_KEY = "sb_publishable_Ve_QZUvSQgQSE9_LcEAHmw_WLaQDSrP"
+SUPABASE_URL = os.environ.get("SUPABASE_URL", "https://ddfalsclevkqhiyojngx.supabase.co")
 AKUN_RAZIP = "backups/supabase-20261002-1344"
 
 
 def panggil(method: str, path: str, body=None):
     data = json.dumps(body).encode() if body is not None else None
+    key = supabase_key()
     req = urllib.request.Request(
         SUPABASE_URL + "/rest/v1/" + path,
         data=data,
         method=method,
         headers={
-            "apikey": SUPABASE_KEY,
-            "Authorization": "Bearer " + SUPABASE_KEY,
+            "apikey": key,
+            "Authorization": "Bearer " + key,
             "Content-Type": "application/json",
             "Prefer": "return=minimal",
         },
     )
-    with urllib.request.urlopen(req, timeout=60) as r:
-        return r.status
+    try:
+        with urllib.request.urlopen(req, timeout=60) as r:
+            return r.status
+    except urllib.error.HTTPError as e:
+        if e.code in (401, 403):
+            raise RuntimeError(
+                f"Supabase menolak {path} (HTTP {e.code}). "
+                "SUPABASE_KEY belum diisi atau bukan service_role key."
+            ) from e
+        raise
 
 
 def main() -> None:

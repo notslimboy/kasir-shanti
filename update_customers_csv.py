@@ -1,14 +1,36 @@
 import urllib.request
+import urllib.error
 import json
 import csv
+import os
 import re
 import sqlite3
 import pathlib
 
 from scripts.parser_customer_reference import build_reference_rows
 
-SUPABASE_URL = "https://ddfalsclevkqhiyojngx.supabase.co"
-SUPABASE_KEY = "sb_publishable_Ve_QZUvSQgQSE9_LcEAHmw_WLaQDSrP"
+SUPABASE_URL = os.environ.get("SUPABASE_URL", "https://ddfalsclevkqhiyojngx.supabase.co")
+
+# The publishable key is embedded in the frontend on purpose, and RLS now
+# rejects it: anon may not read anything. This script runs outside a browser,
+# so it needs a real credential from the environment instead.
+#
+#   export SUPABASE_KEY=sb_secret_...   # service_role, from Dashboard → Settings → API
+#
+# Never commit that value. `.env` is gitignored; keep it there.
+_KEY_BELUM_DIATUR = (
+    "SUPABASE_KEY belum diisi. Script ini butuh service_role key.\n"
+    "  Dashboard → Project Settings → API Keys → service_role → Reveal\n"
+    "  Lalu:  export SUPABASE_KEY='sb_secret_...'\n"
+    "Key publishable tidak lagi bisa dipakai karena RLS sudah ditutup."
+)
+
+
+def supabase_key():
+    key = os.environ.get("SUPABASE_KEY", "").strip()
+    if not key:
+        raise RuntimeError(_KEY_BELUM_DIATUR)
+    return key
 
 CUSTOMER_TAG_ALIASES = {
     "gojek": "GOJEK",
@@ -105,15 +127,27 @@ def resolve_customer_tag(name, aliases_list, tag=""):
 
 def fetch_table(table_name):
     url = f"{SUPABASE_URL}/rest/v1/{table_name}?select=*"
+    key = supabase_key()
     req = urllib.request.Request(
         url,
         headers={
-            "apikey": SUPABASE_KEY,
-            "Authorization": f"Bearer {SUPABASE_KEY}"
+            "apikey": key,
+            "Authorization": f"Bearer {key}"
         }
     )
-    with urllib.request.urlopen(req) as response:
-        return json.loads(response.read().decode("utf-8"))
+    try:
+        with urllib.request.urlopen(req) as response:
+            return json.loads(response.read().decode("utf-8"))
+    except urllib.error.HTTPError as e:
+        # 401/403 means the credential is missing or has the wrong role. An
+        # empty list instead would look like "Supabase has no customers" and
+        # quietly overwrite customers.csv with an empty file.
+        if e.code in (401, 403):
+            raise RuntimeError(
+                f"Supabase menolak {table_name} (HTTP {e.code}). "
+                "SUPABASE_KEY belum diisi atau bukan service_role key.\n" + _KEY_BELUM_DIATUR
+            ) from e
+        raise
 
 def main():
     print("Menghubungkan ke Supabase...")
@@ -126,6 +160,9 @@ def main():
         return 1
 
     # Map aliases and tags
+    if not customers:
+        print("PERINGATAN: Supabase mengembalikan 0 customer. File CSV TIDAK ditulis.")
+        return 1
     aliases_by_cust = {}
     tag_by_cust = {}
     for a in aliases:

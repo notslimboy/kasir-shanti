@@ -5,8 +5,10 @@ import { AnimatePresence, motion } from "motion/react";
 import { Sidebar } from "@/components/sidebar";
 import { ImporPesananPage } from "@/pages/impor-pesanan";
 import { DataProvider, useData } from "@/lib/data-source";
+import { AuthProvider, useAuth } from "@/lib/auth";
 import { triggerSyncFromSheet } from "@/lib/sync-google-sheet";
 import { IconButton } from "@/components/ui/card";
+import { LayarMemuatMasuk, MasukPage } from "@/pages/masuk";
 import { Beranda } from "@/pages/beranda";
 import { KasirPage } from "@/pages/kasir";
 import { PenjualanPage } from "@/pages/penjualan";
@@ -29,6 +31,7 @@ const ico = (d: string) => (
 const IcoSun = ico("M12 4V2M12 22v-2M4 12H2M22 12h-2M5.6 5.6 4.2 4.2M19.8 19.8l-1.4-1.4M5.6 18.4l-1.4 1.4M19.8 4.2l-1.4 1.4M16 12a4 4 0 1 1-8 0 4 4 0 0 1 8 0Z");
 const IcoMoon = ico("M20 14.5A8.5 8.5 0 0 1 9.5 4a8.5 8.5 0 1 0 10.5 10.5Z");
 const IcoMenu = ico("M4 7h16M4 12h16M4 17h16");
+const IcoKeluar = ico("M15 17l5-5-5-5M20 12H9M12 20H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h6");
 
 /* sidebar id <-> route */
 const NAV_TO_ROUTE: Record<string, string> = {
@@ -43,6 +46,26 @@ const NAV_TO_ROUTE: Record<string, string> = {
 };
 
 export default function App() {
+  return (
+    <AuthProvider>
+      <GerbangMasuk />
+    </AuthProvider>
+  );
+}
+
+/** Auth gate.
+ *
+ *  `DataProvider` sits inside the signed-in branch on purpose. It fetches on
+ *  mount, and before this gate existed those fetches went out with the
+ *  publishable key — which RLS now rejects, so every page would render an
+ *  empty menu behind a login screen. Mounting it only once a session exists
+ *  is what makes the two line up. */
+function GerbangMasuk() {
+  const { status } = useAuth();
+
+  if (status === "memuat") return <LayarMemuatMasuk />;
+  if (status === "belum") return <MasukPage />;
+
   return (
     <DataProvider>
       <AppShell />
@@ -86,6 +109,31 @@ function DataBadge() {
       <span className="h-2 w-2 rounded-full bg-success" />
       Live
     </span>
+  );
+}
+
+/** Sign out.
+ *
+ *  Present as an icon rather than a menu, because on a shared kiosk the next
+ *  person must be able to lock the screen without hunting for it. Hidden on
+ *  the narrowest phones where the topbar has no room and the session is
+ *  short-lived anyway. */
+function KeluarButton() {
+  const { keluar } = useAuth();
+  const [bekerja, setBekerja] = useState(false);
+  if (bekerja) return null;
+  return (
+    <button
+      aria-label="Keluar"
+      title="Keluar"
+      onClick={() => {
+        setBekerja(true);
+        void keluar();
+      }}
+      className="hidden h-10 w-10 shrink-0 place-items-center rounded-full border border-border bg-card text-foreground transition-colors hover:border-ring sm:grid"
+    >
+      {IcoKeluar}
+    </button>
   );
 }
 
@@ -171,6 +219,7 @@ function AppShell() {
           <IconButton label={dark ? "Mode terang" : "Mode gelap"} onClick={() => setDark((d) => !d)}>
             {dark ? IcoSun : IcoMoon}
           </IconButton>
+          <KeluarButton />
           <button
             onClick={() => go("kasir")}
             className="flex h-10 items-center gap-2 whitespace-nowrap rounded-full bg-primary px-3.5 font-semibold text-primary-foreground sm:px-4"

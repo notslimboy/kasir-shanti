@@ -13,8 +13,13 @@ export default defineConfig({
        `npm test` ikut memuat file-file itu dan gagal dengan pesan
        "Playwright Test did not expect test.describe() to be called
        here" — bukan karena ada bug, cuma karena dua runner berebut file
-       yang sama. */
-    exclude: ["e2e/**", "node_modules/**", "dist/**"],
+       yang sama.
+
+       File `.test.js` ikut dikecualikan karena `tsc -b` pernah meng-emit
+       JS ke dalam src/ (lihat script `typecheck` di package.json). File
+       `.js` itu hasil stale, bukan source, dan memuatnya membuat setiap
+       test jalan dua kali dengan angka yang terlihat meyakinkan. */
+    exclude: ["e2e/**", "node_modules/**", "dist/**", "src/**/*.test.js"],
   },
   server: {
     port: 5173,

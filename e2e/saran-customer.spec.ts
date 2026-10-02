@@ -1,21 +1,35 @@
 import { expect, test } from "@playwright/test";
 
+import {
+  ALIAS_SUMBER,
+  CUSTOMER_ALIAS_TUJUH,
+  CUSTOMER_ONGKIR,
+  CUSTOMER_PLAIN,
+  ONGKIR_NILAI,
+  pakaiSupabasePalsu,
+} from "./fixture-supabase";
+
 /* Saran customer di keranjang kasir.
 
    Yang dijaga di sini bukan tampilan, tapi dua hal yang mahal kalau rusak:
 
-   1. ALIAS harus bisa menemukan nama aslinya. Kasir mengetik "Bhas Sari 38",
-      harusnya muncul "Bhaskara sari 38" — dan yang TERSIMPAN harus nama
-      asli, bukan yang diketik. Kalau tidak, customer itu jadi orang baru
-      dengan riwayat kosong dan ongkir yang tidak pernah terisi.
-   2. Daftar harus berasal dari Supabase, bukan dari data contoh diam-diam.
-      Kalau semua nama di test bisa ketemu saat database kosong, berarti
-      yang diuji adalah data contoh, bukan fitur. */
+   1. ALIAS harus bisa menemukan nama aslinya. Kasir mengetik alias, harusnya
+      muncul nama aslinya — dan yang TERSIMPAN harus nama asli, bukan yang
+      diketik. Kalau tidak, customer itu jadi orang baru dengan riwayat
+      kosong dan ongkir yang tidak pernah terisi.
+   2. Daftar harus berasal dari customer yang benar-benar dimuat, bukan dari
+      data contoh diam-diam. Kalau semua nama di test bisa ketemu saat
+      database kosong, berarti yang diuji adalah data contoh, bukan fitur.
+
+   Data berasal dari `fixture-supabase.ts`, bukan dari database produksi.
+   Dulu spec ini membaca customer asli, yang membuat klaim "bukan placeholder"
+   mustahil dibuktikan: customer itu ada karena memang ada di tabel. */
 
 const INPUT = 'input[aria-label="Nama customer"]';
 
 test.describe("saran customer", () => {
   test.beforeEach(async ({ page }) => {
+    await pakaiSupabasePalsu(page);
     await page.goto("/kasir");
     await page.waitForLoadState("networkidle");
     await page.locator(INPUT).click();
@@ -27,15 +41,15 @@ test.describe("saran customer", () => {
 
     const opsi = list.getByRole("option");
     const jumlah = await opsi.count();
-    expect(jumlah, "dropdown kosong — customer tidak termuat dari Supabase").toBeGreaterThan(0);
+    expect(jumlah, "dropdown kosong — customer tidak termuat").toBeGreaterThan(0);
 
-    /* Maksimal 12 baris. Kalau semua 327 customer ditampilkan, dropdown
-       bukan lagi alat bantu tapi daftar yang mustahil dibaca. */
+    /* Maksimal 12 baris. Kalau semua customer ditampilkan, dropdown bukan
+       lagi alat bantu tapi daftar yang mustahil dibaca. */
     expect(jumlah).toBeLessThanOrEqual(12);
 
-    /* Nama harus berasal dari tabel customers. "Anak 7/37" ada di sana;
-       kalau ini tidak ketemu, yang tampil memang bukan data nyata. */
-    await page.locator(INPUT).fill("Anak 7/37");
+    /* Ketik nama customer dari fixture. Kalau tidak ketemu, nama yang tampil
+       bukan dari customer yang dimuat. */
+    await page.locator(INPUT).fill(CUSTOMER_PLAIN);
     await expect(list.getByRole("option").first()).toBeVisible();
   });
 
@@ -45,7 +59,7 @@ test.describe("saran customer", () => {
     await page.waitForTimeout(300);
 
     const opsi = list.getByRole("option");
-    if ((await opsi.count()) === 0) return; // tidak ada customer "ITS" di DB ini
+    expect(await opsi.count(), "tidak ada customer 'ITS' di fixture").toBeGreaterThan(0);
     await expect(opsi.first()).toContainText("ITS");
   });
 
@@ -53,90 +67,67 @@ test.describe("saran customer", () => {
     const input = page.locator(INPUT);
     const list = page.getByRole("listbox", { name: "Saran customer" });
 
-    await input.fill("Anak 7/37");
+    await input.fill(CUSTOMER_PLAIN);
     await page.waitForTimeout(300);
 
     const opsi = list.getByRole("option");
-    if ((await opsi.count()) === 0) return;
+    expect(await opsi.count()).toBeGreaterThan(0);
 
-    const namaAsli = (await opsi.first().innerText()).split("\n")[0].trim();
     await opsi.first().click();
 
     /* Ini inti dari test ini. Kalau yang tersimpan adalah string yang
        diketik, customer itu jadi duplikat. */
-    await expect(input).toHaveValue(namaAsli);
+    await expect(input).toHaveValue(CUSTOMER_PLAIN);
   });
 
   test("alias menemukan customer yang namanya berbeda", async ({ page }) => {
     const input = page.locator(INPUT);
     const list = page.getByRole("listbox", { name: "Saran customer" });
 
-    /* "Bhas Sari 38" → "Bhaskara sari 38": nama alias tidak pernah sama
-       dengan nama aslinya. Kalau alias tidak dipakai, customer ini
-       mustahil ditemukan. */
-    await input.fill("Bhas Sari 38");
+    /* Alias di fixture sengaja dibuat berbeda dari nama aslinya, dan nama
+       asli juga sengaja tidak memuat kata "Bhas". Kalau alias tidak dipakai,
+       customer ini mustahil ditemukan. */
+    await input.fill(ALIAS_SUMBER);
     await page.waitForTimeout(400);
 
     const opsi = list.getByRole("option");
-    if ((await opsi.count()) === 0) {
-      test.info().annotations.push({
-        type: "note",
-        description: "alias 'Bhas Sari 38' tidak ada di database",
-      });
-      return;
-    }
+    expect(await opsi.count(), `alias '${ALIAS_SUMBER}' tidak ditemukan`).toBeGreaterThan(0);
 
-    /* Kalau ketemu, nama yang ditampilkan harus yang ASLI — dan jejak
-       alias harus terlihat, supaya kasir tahu itu customer yang sama. */
+    /* Nama yang ditampilkan harus yang ASLI — supaya kasir tahu itu customer
+       yang sama, bukan customer baru. */
     const teks = await opsi.first().innerText();
-    expect(teks).toContain("Bhaskara");
+    expect(teks).toContain(CUSTOMER_ALIAS_TUJUH);
   });
 
   test("memilih customer mengisi ongkir lamanya", async ({ page }) => {
     const input = page.locator(INPUT);
     const list = page.getByRole("listbox", { name: "Saran customer" });
 
-    /* Cari customer yang punya ongkir — angka itu hanya muncul di kanan
-       baris daftar kalau customer-nya memang punya default_shipping. */
-    let ditemukan = false;
-    for (const q of ["Tenggilis", "Eni SMP", "Pucangan"]) {
-      await input.fill(q);
-      await page.waitForTimeout(400);
-      const opsi = list.getByRole("option");
-      if ((await opsi.count()) === 0) continue;
-      const baris = await opsi.first().innerText();
-      if (!/Rp\s[\d.]+/.test(baris)) continue;
+    await input.fill(CUSTOMER_ONGKIR);
+    await page.waitForTimeout(400);
+    const opsi = list.getByRole("option");
+    expect(await opsi.count()).toBeGreaterThan(0);
+    await opsi.first().click();
 
-      ditemukan = true;
-      const ongkirTampil = Number((baris.match(/Rp\s([\d.]+)/) ?? [])[1]?.replace(/\./g, "") ?? 0);
+    /* Efek `terisiOngkir` di kasir.tsx mengisi kolom Ongkir. Kalau tidak,
+       dropdown menampilkan ongkir tapi transaksi selesai tanpa ongkir — dan
+       kasir mengira tidak ada ongkir.
 
-      await opsi.first().click();
-      await page.locator(INPUT).blur();
-      await page.waitForTimeout(300);
-
-      /* Efek `terisiOngkir` di kasir.tsx mengisi kolom Ongkir. Kalau tidak,
-         dropdown menampilkan ongkir tapi transaksi selesai tanpa ongkir —
-         dan kasir mengira tidak ada ongkir.
-
-         Titik WAJIB dihapus, bukan `Number` polos: kolom Ongkir memakai
-         InputRupiah yang menampilkan pemisah ribuan Indonesia, jadi isinya
-         "35.000". `Number("35.000")` bernilai 35 — menguji begitu saja
-         akan selalu gagal dan membuat orang mengira ongkirnya salah. */
-      const isiOngkir = await page.locator('input[aria-label="Ongkir"]').inputValue();
-      const angkaOngkir = Number(isiOngkir.replace(/\D/g, ""));
-      expect(angkaOngkir, "ongkir customer tidak masuk ke kolom Ongkir").toBe(ongkirTampil);
-      return;
-    }
-
-    test.info().annotations.push({ type: "note", description: "tidak ada customer berongkir di database" });
-    expect(ditemukan).toBe(false);
+       Titik WAJIB dihapus, bukan `Number` polos: kolom Ongkir memakai
+       InputRupiah yang menampilkan pemisah ribuan Indonesia, jadi isinya
+       "35.000". `Number("35.000")` bernilai 35 — menguji begitu saja akan
+       selalu gagal dan membuat orang mengira ongkirnya salah. */
+    const isiOngkir = await page.locator('input[aria-label="Ongkir"]').inputValue();
+    const angkaOngkir = Number(isiOngkir.replace(/\D/g, ""));
+    expect(angkaOngkir, "ongkir customer tidak masuk ke kolom Ongkir").toBe(ONGKIR_NILAI);
   });
 
   test("Escape menutup daftar tanpa mengubah isi input", async ({ page }) => {
     const input = page.locator(INPUT);
     const list = page.getByRole("listbox", { name: "Saran customer" });
+    const ketik = CUSTOMER_PLAIN.split(" ")[0];
 
-    await input.fill("Anak");
+    await input.fill(ketik);
     await expect(list).toBeVisible();
 
     await input.press("Escape");
@@ -144,14 +135,17 @@ test.describe("saran customer", () => {
 
     /* Menutup daftar bukan berarti membatalkan ketikan — kasir sudah
        mengetik dan tidak boleh kehilangan teks itu. */
-    await expect(input).toHaveValue("Anak");
+    await expect(input).toHaveValue(ketik);
   });
 
   test("kursor keyboard mengikuti daftar", async ({ page }) => {
     const input = page.locator(INPUT);
     const list = page.getByRole("listbox", { name: "Saran customer" });
     const opsi = list.getByRole("option");
-    if ((await opsi.count()) < 3) return;
+    expect(
+      await opsi.count(),
+      "fixture harus punya cukup customer untuk menguji navigasi panah",
+    ).toBeGreaterThanOrEqual(3);
 
     await input.press("ArrowDown");
     await expect(opsi.nth(1)).toHaveAttribute("data-aktif", "true");
