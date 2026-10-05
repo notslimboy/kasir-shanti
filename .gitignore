@@ -13,6 +13,10 @@ src/**/*.js.map
 *.png
 !design/reference.png
 !public/*.png
+# `!public/*.png` hanya cocok untuk file langsung di public/. Logo struk ada
+# di public/thermal/ — tanpa baris ini keduanya tidak pernah ikut repo, dan
+# struk yang sudah dicetak jadi punya logo, sementara yang di-server tidak.
+!public/**/*.png
 
 # Artefak Playwright — trace kegagalan berisi snapshot seluruh DOM,
 # termasuk data yang tampil di layar. Jangan masuk repo.

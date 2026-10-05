@@ -1,16 +1,16 @@
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { AnimatePresence, motion } from "motion/react";
 
 import { Drawer } from "@/components/ui/drawer";
-import { Struk } from "@/components/struk";
+import { Struk, type StrukHandle } from "@/components/struk";
 import { Pill } from "@/components/ui/card";
 import { btnGhost, btnPrimary, inputClass } from "@/components/ui/kit";
 import { IkonAksi, IkonHapusPermanen, IkonRestore } from "@/components/ui/ikon-aksi";
 import { rupiah } from "@/lib/format";
 import { formatRupiah } from "@/lib/struk";
+import { useSetelan } from "@/lib/setelan";
 import { InputRupiah } from "@/components/ui/input-rupiah";
 import type { Sale } from "@/lib/sale";
-import { STRUK_DEFAULT } from "@/lib/struk";
 
 /* ==========================================================================
    Detail Struk — drawer yang dibuka dari tabel Detail Struk.
@@ -45,6 +45,14 @@ export function StrukDrawer({
 }) {
   const [mode, setMode] = useState<"lihat" | "edit" | "cetak">("lihat");
   const [tersimpan, setTersimpan] = useState(false);
+  /* Preview receipt lives in mode "cetak". Ref needed so "Cetak Ulang" can
+     call its own print() — the button used to just setMode("cetak"), which
+     was a no-op while already in that mode. */
+  const strukRef = useRef<StrukHandle>(null);
+  /* Cetak ulang harus memakai setelan yang benar-benar aktif, bukan
+     STRUK_DEFAULT. Kalau kasir menyetel 80mm, struk yang dicetak ulang akan
+     tetap 48mm dan keluar terpotong. */
+  const [setelan] = useSetelan();
   const [form, setForm] = useState<{
     customer: string;
     address: string;
@@ -87,7 +95,7 @@ export function StrukDrawer({
         open={sale !== null}
         onClose={onClose}
         title="Detail Struk"
-        subtitle={sale ? `${sale.receiptNo} · ${STRUK_DEFAULT.receiptWidth}mm` : undefined}
+        subtitle={sale ? `${sale.receiptNo} · ${setelan.receiptWidth}mm` : undefined}
         width="sm:max-w-[480px]"
         footer={
           sale && (
@@ -242,8 +250,16 @@ export function StrukDrawer({
                   <button onClick={() => setMode("lihat")} className={btnGhost}>
                     Kembali
                   </button>
-                  <button onClick={() => setMode("cetak")} className={btnPrimary}>
-                    Cetak {STRUK_DEFAULT.receiptWidth}mm
+                  {/* Gunakan ref struk, bukan mode: `setMode("cetak")` di
+                      dalam mode "cetak" itu set state ke nilai yang sama,
+                      jadi nol-op dan dialog cetak tidak pernah muncul.
+                      PRINTER_DEFAULT.receiptWidth juga bukan sumber
+                      kebenaran di sini — setelan bisa 80mm. */}
+                  <button
+                    onClick={() => void strukRef.current?.cetak()}
+                    className={btnPrimary}
+                  >
+                    Cetak Ulang
                   </button>
                 </motion.div>
               )}
@@ -450,6 +466,7 @@ export function StrukDrawer({
                   {/* Pratinjau memakai modul struk yang sama dengan hasil
                       cetak, jadi tidak mungkin melenceng dari struk asli. */}
                   <Struk
+                    ref={strukRef}
                     data={{
                       receiptNo: sale.receiptNo,
                       payment: sale.payment,
@@ -468,7 +485,7 @@ export function StrukDrawer({
                         lineTotal: l.price * l.qty,
                       })),
                     }}
-                    setelan={STRUK_DEFAULT}
+                    setelan={setelan}
                   />
                 </motion.div>
               )}
