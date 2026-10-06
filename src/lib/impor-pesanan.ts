@@ -195,12 +195,23 @@ export type ItemImpor = {
       baris yang hilang. Tapi struk tidak boleh disimpan selama masih ada
       harga kosong: satu struk Rp 0 merusak pembukuan diam-diam. */
   hargaKosong: boolean;
+  /** true = harga ini datang dari kolom `harga` di CSV (atau diketik kasir),
+      BUKAN dari katalog. Dibedakan karena keduanya sama-sama "> 0" di
+      object: tanpa flag ini, harga katalog untuk varian biasa akan terlihat
+      seperti harga yang sudah dipastikan orang, dan harga varian yang
+      dipilih tidak pernah bisa menang. */
+  hargaDariCsv?: boolean;
   /** client_id barang katalog yang sudah dicocokkan. Kosong = belum cocok,
       dan itu yang membuat draft berstatus "Perlu review". */
   productClientId: string;
   productName: string;
   /** Varian priced custom perlu dicek orang sebelum dipakai. */
   perluCekHarga: boolean;
+  /** true = pesan ini porsi separuh (quantity 0.5) tapi produk katalognya
+      tidak punya varian "Separuh". Nilai TIDAK ditebak: draft ditahan dan
+      kasir yang memilih, karena jatuh diam-diam ke varian Normal membuat
+      struk separuh tercatat sebagai porsi penuh. */
+  perluVarianSeparuh?: boolean;
   /** Sisa stok katalog; null = tanpa batas. Dipakai untuk isu "stok kurang". */
   stok: number | null;
   catatan: string;
@@ -361,6 +372,7 @@ export function parsePesananCsv(teks: string, cariHarga?: CariHarga): HasilImpor
       qty,
       harga,
       hargaKosong,
+      hargaDariCsv: Boolean(hargaTeks),
       productClientId: dariKatalog ? dariKatalog.client_id : "",
       productName: dariKatalog?.produkNama ?? "",
       varian: varian || dariKatalog?.nama || "",

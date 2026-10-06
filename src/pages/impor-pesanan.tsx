@@ -12,7 +12,8 @@ import { Toast, useToast } from "@/components/ui/toast";
 import { rupiah, rupiahShort } from "@/lib/format";
 import { parsePesananCsv, type PesananImpor } from "@/lib/impor-pesanan";
 import { kandidatJelas, rankedKandidat, varianDariNama } from "@/lib/cocok-produk";
-import { cocokkanDraft, isuDraft, rekapDraft, siapDraft, statusDraft } from "@/lib/status-draft";
+import { cocokkanDraft, isuDraft, normalisasiSeparuh, rekapDraft, siapDraft, statusDraft } from "@/lib/status-draft";
+import { isHalfVariantName } from "@/lib/pricing";
 import { simpanPesananImpor } from "@/lib/simpan-impor";
 import { AI_BULK_PROMPT, contohCsv } from "@/lib/contoh-impor";
 import { useData } from "@/lib/data-source";
@@ -187,12 +188,14 @@ export function ImporPesananPage() {
     const kosong = { pesanan: [], masalah: [], barisDibaca: 0, barisDilewati: 0 };
     if (!sudahDibuat) return kosong;
     const parsed = parsePesananCsv(teks, cariHarga);
+    /* Urutan: dicocokkan ke katalog dulu (cocokkanDraft), baru porsi
+       separuh dinormalkan. Normalisasi butuh productClientId, jadi tidak
+       bisa jalan lebih dulu. */
+    const sudahCocok = parsed.pesanan.map((p) => normalisasiSeparuh(cocokkanDraft(p, katalog), katalog));
     return {
       ...parsed,
-      pesanan: parsed.pesanan.map((p) => cocokkanDraft(p, katalog)),
-      masalah: parsed.pesanan.flatMap((p) =>
-        isuDraft(cocokkanDraft(p, katalog)).map((i) => ({ baris: p.baris, pesan: i.pesan })),
-      ),
+      pesanan: sudahCocok,
+      masalah: sudahCocok.flatMap((p) => isuDraft(p).map((i) => ({ baris: p.baris, pesan: i.pesan }))),
     };
   }, [sudahDibuat, teks, cariHarga, katalog]);
 
@@ -256,11 +259,23 @@ export function ImporPesananPage() {
       return sumber.map((p) => (p.baris === barisDraft ? perhitungkanUlang(ubah(p)) : p));
     });
 
+  /* Harga diketik = kasir yang memastikan. Itu juga yang melepas status
+     "harga custom perlu dicek" dan "varian separuh tidak ada": selama
+     belum ada harga yang diketik, struk ditahan (isuDraft). */
   const setHargaItem = (barisDraft: number, barisItem: number, harga: number) =>
     ubahDraft(barisDraft, (p) => ({
       ...p,
       items: p.items.map((it) =>
-        it.baris === barisItem ? { ...it, harga: Math.max(0, harga), hargaKosong: harga <= 0 } : it,
+        it.baris === barisItem
+          ? {
+              ...it,
+              harga: Math.max(0, harga),
+              hargaKosong: harga <= 0,
+              hargaDariCsv: true,
+              perluCekHarga: harga <= 0,
+              perluVarianSeparuh: false,
+            }
+          : it,
       ),
     }));
 
@@ -275,20 +290,36 @@ export function ImporPesananPage() {
         items: p.items.map((it) => {
           if (it.baris !== barisItem) return it;
           if (!produk || !v) {
-            return { ...it, productClientId: "", productName: "", hargaKosong: true, perluCekHarga: false };
+            return {
+              ...it,
+              productClientId: "",
+              productName: "",
+              hargaKosong: true,
+              perluCekHarga: false,
+              perluVarianSeparuh: false,
+              hargaDariCsv: false,
+            };
           }
           const custom = v.pricing_type === "custom";
+          /* Memilih varian "Separuh" menutup quantity 0.5 — kasir baru saja
+             memastikan porsinya. */
+          const separuh = isHalfVariantName(v.name);
           return {
             ...it,
             productClientId: produk.client_id,
             productName: produk.name,
             varian: v.name,
             stok: produk.stok,
+            qty: separuh ? 1 : it.qty,
             /* Harga custom TIDAK ditebak: tetap 0 sampai diketik, dan ditandai
                perlu dicek — menebaknya berarti mengarang harga. */
             harga: custom ? it.harga : v.price,
+            /* Harga yang diketik manusia (hargaDariCsv) tetap berlaku walau
+               varian diganti — kasir sudah melihat angkanya. */
             hargaKosong: custom ? it.harga <= 0 : v.price <= 0,
-            perluCekHarga: custom,
+            hargaDariCsv: custom ? it.hargaDariCsv : false,
+            perluCekHarga: custom && it.harga <= 0,
+            perluVarianSeparuh: false,
           };
         }),
       };

@@ -68,7 +68,10 @@ export function Beranda() {
   /* Kartu Beranda memakai ringkasStruk (30 hari + sale_items), bukan
      struk yang sedang difilter di halaman Penjualan. */
   const terlaris = useMemo(() => menuTerlarisDari(live.ringkasStruk, 6), [live.ringkasStruk]);
-  const favorit = useMemo(() => pelangganFavoritDari(live.customers, 5), [live.customers]);
+  /* Enam, dan eksplisit. Default `pelangganFavoritDari` adalah lima, jadi
+   mengandalkan defaultnya membuat kartu diam-diam melambat satu baris tanpa
+   ada yang membandingkan dengan harapan. */
+  const favorit = useMemo(() => pelangganFavoritDari(live.customers, 6), [live.customers]);
   const strukTerbaru: Sale[] = live.ringkasStruk.slice(0, 8);
   /* Ongkir per kurir. Kolom kurir tidak ada di tabel sales — yang ada
      customers.tag (area/franchise), dan itu yang dipetakan, persis seperti

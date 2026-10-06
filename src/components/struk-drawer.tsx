@@ -9,6 +9,7 @@ import { IkonAksi, IkonHapusPermanen, IkonRestore } from "@/components/ui/ikon-a
 import { rupiah } from "@/lib/format";
 import { formatRupiah } from "@/lib/struk";
 import { useSetelan } from "@/lib/setelan";
+import type { HasilUbah, UbahStrukInput } from "@/lib/supabase-tulis";
 import { InputRupiah } from "@/components/ui/input-rupiah";
 import type { Sale } from "@/lib/sale";
 
@@ -23,12 +24,62 @@ import type { Sale } from "@/lib/sale";
 const STATUS_TONE = { lunas: "success", belum: "warning", terhapus: "danger" } as const;
 const STATUS_LABEL = { lunas: "Lunas", belum: "Belum Lunas", terhapus: "Dihapus" } as const;
 
+/* -------------------------------------------------------------------------
+   Form Ubah Data
+
+   `sendNote`, bukan `address`. Kolom `sales.send_note` yang dicetak struk
+   sebagai "CATATAN KIRIM"; alamat customer tidak pernah masuk ke kertas, jadi
+   field "Alamat Kirim" yang lama hanya menghasilkan data yang tidak terlihat
+   di mana pun — dan membiarkan kasir mengira mengeditnya berarti sesuatu.
+
+   `note` per baris ikut dibawa karena struk mencetaknya sebagai catatan item
+   ("saos bnyakin", "tanpa lombok") dan KOT membacanya untuk dapur. Sebelumnya
+   keduanya hilang begitu Cetak Ulang ditekan, walau struk aslinya memuatnya.
+   -------------------------------------------------------------------------- */
+
+/* `id` dibuat wajib di sini (walau di `SaleLine` opsional) karena baris form
+   selalu dibangun lewat `formDariStruk`, dan hanya baris form yang dikirim ke
+   `ubahStruk`. `id: 0` berarti baris tanpa primary key — lihat `formDariStruk`. */
+type BarisForm = { id: number; name: string; variant: string; qty: number; price: number; note: string };
+type FormUbah = { customer: string; sendNote: string; lines: BarisForm[] };
+
+const FORM_KOSONG: FormUbah = { customer: "", sendNote: "", lines: [] };
+
+function formDariStruk(sale: Sale): FormUbah {
+  return {
+    customer: sale.customer,
+    sendNote: sale.sendNote ?? "",
+    lines: (sale.lines ?? []).map((l) => ({
+      /* `?? 0` menandai baris yang tidak punya id. `ubahStruk` menolak
+         angka itu daripada menulis ke `id=eq.0`. */
+      id: l.id ?? 0,
+      name: l.name,
+      variant: l.variant,
+      qty: l.qty,
+      price: l.price,
+      note: l.note ?? "",
+    })),
+  };
+}
+
+function useFormUbah() {
+  return useState<FormUbah>(FORM_KOSONG);
+}
+
+/** Baris yang akan hilang kalau disimpan dalam keadaan sekarang: qty-nya 0
+ *  atau minus. Nama barisnya dipakai untuk peringatan sebelum disimpan —
+ *  konfirmasi tanpa nama tidak membuat orang berhenti sebelum menekan Simpan. */
+function barisDibuang(lines: BarisForm[]): BarisForm[] {
+  return lines.filter((l) => l.qty <= 0);
+}
+
 export function StrukDrawer({
   sale,
   onClose,
   onHapus,
   onRestore,
   onHapusPermanen,
+  onSimpan,
   sedangProses = false,
 }: {
   sale: Sale | null;
@@ -39,12 +90,18 @@ export function StrukDrawer({
   /** Hapus permanen. Kosong = aksi disembunyikan. Pemanggilnya yang membuka
    *  konfirmasi — drawer ini tidak menulis apa pun sendiri. */
   onHapusPermanen?: (sale: Sale) => void;
+  /** Tulis form Ubah Data ke server. Kosong = tombol Simpan disembunyikan,
+   *  karena tanpa ini "✓ Tersimpan" cuma bohong: tidak ada yang masuk
+   *  database dan seluruh ketikan hilang saat drawer ditutup. */
+  onSimpan?: (payload: UbahStrukInput) => Promise<HasilUbah>;
   /** True selama request ke server berjalan — tombol dinonaktifkan supaya
    *  dua klik cepat tidak mengirim dua permintaan. */
   sedangProses?: boolean;
 }) {
   const [mode, setMode] = useState<"lihat" | "edit" | "cetak">("lihat");
   const [tersimpan, setTersimpan] = useState(false);
+  const [galatSimpan, setGalatSimpan] = useState<string | null>(null);
+  const [menyimpan, setMenyimpan] = useState(false);
   /* Preview receipt lives in mode "cetak". Ref needed so "Cetak Ulang" can
      call its own print() — the button used to just setMode("cetak"), which
      was a no-op while already in that mode. */
@@ -53,11 +110,7 @@ export function StrukDrawer({
      STRUK_DEFAULT. Kalau kasir menyetel 80mm, struk yang dicetak ulang akan
      tetap 48mm dan keluar terpotong. */
   const [setelan] = useSetelan();
-  const [form, setForm] = useState<{
-    customer: string;
-    address: string;
-    lines: { name: string; variant: string; qty: number; price: number }[];
-  }>({ customer: "", address: "", lines: [] });
+  const [form, setForm] = useFormUbah();
 
   /* Buka dengan isi struk yang dipilih. Dilakukan di sini supaya panel
      selalu mulai dari data yang benar, tidak dari sisa edit sebelumnya. */
@@ -67,27 +120,68 @@ export function StrukDrawer({
     setLastKey(key);
     setMode("lihat");
     setTersimpan(false);
-    setForm({
-      customer: sale.customer,
-      address: sale.address ?? "",
-      lines: (sale.lines ?? []).map((l) => ({
-        name: l.name,
-        variant: l.variant,
-        qty: l.qty,
-        price: l.price,
-      })),
-    });
+    setGalatSimpan(null);
+    setForm(formDariStruk(sale));
   }
 
   const subtotal = form.lines.reduce((a, l) => a + l.price * l.qty, 0);
   const ongkir = sale?.ongkir ?? 0;
   const diskon = sale?.diskon ?? 0;
+  const totalBaru = Math.max(0, subtotal - diskon + ongkir);
+  const totalLama = sale?.total ?? 0;
 
-  const ubahBaris = (i: number, patch: Partial<{ qty: number; price: number }>) =>
+  const ubahBaris = (i: number, patch: Partial<{ qty: number; price: number; note: string }>) =>
     setForm((f) => ({
       ...f,
       lines: f.lines.map((l, idx) => (idx === i ? { ...l, ...patch } : l)),
     }));
+
+  /* Menulis ke server. Gagal = tetap di mode edit dan alasannya ditampilkan;
+     keluar dari mode edit padahal tidak ada yang tersimpan adalah cara paling
+     cepatittekan kasir mengira perubahannya sudah masuk. */
+  const simpan = async () => {
+    if (!sale || !onSimpan || menyimpan) return;
+    setGalatSimpan(null);
+    setMenyimpan(true);
+    try {
+      const hasil = await onSimpan({
+        saleId: sale.id,
+        customer: form.customer,
+        sendNote: form.sendNote,
+        ongkir,
+        diskon,
+        lines: form.lines.map((l) => ({
+          id: l.id,
+          qty: l.qty,
+          price: l.price,
+          note: l.note,
+        })),
+      });
+      if (!hasil.ok) {
+        setGalatSimpan(hasil.pesan ?? "Gagal menyimpan perubahan.");
+        return;
+      }
+      /* Total naik = `paid_amount` jadi lebih kecil dari total, jadi struk
+         berbalik jadi "Belum Lunas". Diberi tahu di sini, bukan dibiarkan
+         muncul sendiri di tabel tanpa penjelasan. */
+      if (hasil.statusBerubah) {
+        setGalatSimpan(
+          `Tersimpan, tapi struk jadi BELUM LUNAS: total naik dari Rp ${totalLama.toLocaleString("id-ID")} ke Rp ${(hasil.total ?? totalBaru).toLocaleString("id-ID")}, sedangkan uang yang sudah dibayar tidak berubah.`,
+        );
+      } else {
+        setGalatSimpan(null);
+      }
+      setTersimpan(true);
+      setTimeout(() => {
+        setTersimpan(false);
+        setMode("lihat");
+      }, 620);
+    } catch (e) {
+      setGalatSimpan(`Gagal menyimpan: ${(e as Error).message}`);
+    } finally {
+      setMenyimpan(false);
+    }
+  };
 
 
   return (
@@ -209,32 +303,28 @@ export function StrukDrawer({
                     </motion.span>
                   )}
                   <button
-                    onClick={() => setMode("lihat")}
-                    disabled={tersimpan}
+                    onClick={() => {
+                      setGalatSimpan(null);
+                      setMode("lihat");
+                    }}
+                    disabled={tersimpan || menyimpan}
                     className={btnGhost + " disabled:opacity-40"}
                   >
                     Kembali
                   </button>
-                  <motion.button
-                    onClick={() => {
-                      // Item qty 0 dibuang: struk dengan baris 0 akan
-                      // tercetak sia-sia.
-                      setForm((f) => ({
-                        ...f,
-                        lines: f.lines.filter((l) => l.qty > 0),
-                      }));
-                      setTersimpan(true);
-                      setTimeout(() => {
-                        setTersimpan(false);
-                        setMode("lihat");
-                      }, 620);
-                    }}
-                    disabled={tersimpan}
-                    whileTap={{ scale: 0.96 }}
-                    className={btnPrimary + " disabled:opacity-40"}
-                  >
-                    Simpan
-                  </motion.button>
+                  {/* Rendered only when there is a writer. A permanently disabled "Simpan"
+                    is worse than no button: it looks like the action exists,
+                    and clicking it explains nothing. */}
+                  {onSimpan && (
+                    <motion.button
+                      onClick={() => void simpan()}
+                      disabled={tersimpan || menyimpan}
+                      whileTap={{ scale: 0.96 }}
+                      className={btnPrimary + " disabled:opacity-40"}
+                    >
+                      {menyimpan ? "Menyimpan…" : "Simpan"}
+                    </motion.button>
+                  )}
                 </motion.div>
               )}
 
@@ -374,13 +464,19 @@ export function StrukDrawer({
                   </label>
                   <label className="block">
                     <span className="mb-1.5 block text-[11px] font-bold uppercase tracking-wider text-muted-foreground">
-                      Alamat Kirim
+                      Catatan Kirim
                     </span>
                     <input
-                      value={form.address}
-                      onChange={(e) => setForm({ ...form, address: e.target.value })}
+                      aria-label="Catatan kirim"
+                      value={form.sendNote}
+                      onChange={(e) => setForm({ ...form, sendNote: e.target.value })}
                       className={inputClass}
+                      placeholder=" Dicetak di struk sebagai CATATAN KIRIM"
                     />
+                    <span className="mt-1 block text-xs text-muted-foreground">
+                      Yang muncul di kertas. Alamat customer sudah tersimpan di
+                      data customer dan tidak dicetak di struk.
+                    </span>
                   </label>
 
                   {/* Item bisa salah ketik: qty kelewat atau harga keliru
@@ -402,7 +498,11 @@ export function StrukDrawer({
 
                     <ul className="space-y-1.5">
                       {form.lines.map((l, i) => (
-                        <li key={`${l.name}-${i}`} className="rounded-2xl border border-input bg-card p-2.5">
+                        /* Key by id, not name — the same menu can appear twice
+                           in one receipt under different variants, and the
+                           name is editable, so a name-based key makes React
+                           reuse the wrong row's inputs mid-edit. */
+                        <li key={l.id} className="rounded-2xl border border-input bg-card p-2.5">
                           <div className="flex items-baseline justify-between gap-2">
                             <span className="min-w-0 flex-1 truncate text-sm font-semibold">
                               {l.name}
@@ -422,6 +522,7 @@ export function StrukDrawer({
                                 Qty
                               </span>
                               <input
+                                aria-label={`Qty ${l.name}`}
                                 type="number"
                                 min={0}
                                 step="1"
@@ -442,15 +543,61 @@ export function StrukDrawer({
                               />
                             </label>
                           </div>
+
+                          {/* Catatan per baris: "saos bnyakin", "tanpa lombok".
+                              Ini yang dicetak struk dan dibaca dapur lewat KOT.
+                              Tidak ada input-nya sebelumnya, jadi catatan yang
+                              sudah tersimpan hilang begitu struk di-cetak ulang. */}
+                          <label className="mt-1.5 block">
+                            <span className="mb-0.5 block text-[10px] font-bold uppercase tracking-wider text-muted-foreground">
+                              Catatan item
+                            </span>
+                            <input
+                              aria-label={`Catatan item ${l.name}`}
+                              value={l.note}
+                              onChange={(e) => ubahBaris(i, { note: e.target.value })}
+                              className="h-9 w-full rounded-lg border border-input bg-card px-2.5 text-sm outline-none placeholder:text-muted-foreground focus:border-ring"
+                              placeholder="saos bnyakin, tanpa lombok…"
+                            />
+                          </label>
                         </li>
                       ))}
                     </ul>
                   </div>
 
+                  {totalBaru !== totalLama && (
+                    <p className="rounded-2xl bg-[#F3DBA2] px-3.5 py-2.5 text-xs font-medium text-[#6B4A0A] dark:bg-[#3A2A10] dark:text-[#F0C987]">
+                      Total berubah {formatRupiah(totalLama)} → {formatRupiah(totalBaru)}.
+                      Uang yang sudah dibayar tidak ikut berubah, jadi kalau total
+                      naik struk ini akan jadi{" "}
+                      <strong>Belum Lunas</strong>.
+                    </p>
+                  )}
+                  {barisDibuang(form.lines).length > 0 && (
+                    /* One string, not several nodes: a sentence broken across
+                       elements cannot be read by a screen reader as a
+                       sentence, and cannot be matched in a test either. */
+                    <p className="rounded-2xl bg-destructive/10 px-3.5 py-2.5 text-xs font-medium text-destructive">
+                      {`${barisDibuang(form.lines)
+                        .map((l) => l.name)
+                        .join(", ")} qty 0 — barisnya akan dihapus, catatan yang ikut hilang.`}
+                    </p>
+                  )}
                   <p className="rounded-2xl bg-muted px-3.5 py-2.5 text-xs text-muted-foreground">
                     Item ber&nbsp;qty 0 otomatis dibuang saat disimpan. Ongkir dan diskon
                     tidak ikut dihitung ulang — ubah dari menu Penjualan.
                   </p>
+                  {/* role="alert": tanpa itu, kegagalan simpan hanya terlihat
+                      karena mode tidak berubah, dan itu alasan yang sama
+                      dengan animasi biasa. */}
+                  {galatSimpan && (
+                    <p
+                      role="alert"
+                      className="rounded-2xl bg-destructive/10 px-3.5 py-2.5 text-xs font-medium text-destructive"
+                    >
+                      {galatSimpan}
+                    </p>
+                  )}
                 </motion.div>
               )}
 
@@ -473,16 +620,23 @@ export function StrukDrawer({
                       customerName: form.customer,
                       chatDate: sale.completedAt,
                       queueNo: null,
-                      sendNote: "",
+                      /* Dari form, bukan string kosong — begitu pula `note`
+                         per item di bawah. Keduanya dulu di-hardcode/dibuang,
+                         jadi Cetak Ulang mencetak struk yang isinya berbeda
+                         dari struk yang aslinya sudah keluar dari printer. */
+                      sendNote: form.sendNote,
                       subtotal,
                       shipping: sale.ongkir ?? 0,
-                      total: sale.total,
+                      /* Total ikut mengikuti form: kalau qty/harga diedit, yang
+                         dicetak harus angkanya yang baru, bukan total lama. */
+                      total: totalBaru,
                       items: form.lines.map((l) => ({
                         name: l.name,
                         variant: l.variant,
                         qty: l.qty,
                         price: l.price,
                         lineTotal: l.price * l.qty,
+                        note: l.note,
                       })),
                     }}
                     setelan={setelan}

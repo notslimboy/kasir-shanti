@@ -1,6 +1,12 @@
 import { describe, expect, it } from "vitest";
 
-import { mundur, persenPerubahan, ringkasanDari, totalOngkir } from "./ringkasan";
+import {
+  mundur,
+  pelangganFavoritDari,
+  persenPerubahan,
+  ringkasanDari,
+  totalOngkir,
+} from "./ringkasan";
 import type { SaleRow } from "@/supabase/types";
 
 /* Angka di Beranda dipakai untuk memutuskan jam buka/tutup. Salah hitung di
@@ -156,5 +162,60 @@ describe("persenPerubahan", () => {
   it("dari nol tidak menghasilkan Infinity", () => {
     expect(persenPerubahan(50, 0)).toBe(100);
     expect(persenPerubahan(0, 0)).toBe(0);
+  });
+});
+
+/* Pelanggan Favorit di Beranda.
+ *
+ * Beranda meminta enam baris, dan `pelangganFavoritDari` punya default lima.
+ * Angka itu tidak pernah diuji, jadi tidak ada yang menangkap kalau keduanya
+ * berbeda — kartu hanya menampilkan lima dan tidak ada yang membandingkan
+ * dengan harapan. */
+
+const c = (name: string, total: number, orderCount = 1) => ({
+  name,
+  total,
+  orderCount,
+  lastOrder: "22 September 2026",
+});
+
+describe("pelangganFavoritDari", () => {
+  it("mengembalikan sejumlah baris yang diminta", () => {
+    /* Default-nya 5, dan itu yang membuat kartu Beranda melambat dari enam. */
+    const pelanggan = [
+      c("A", 7300), c("B", 3600), c("C", 2600), c("D", 2400), c("E", 2200), c("F", 2100),
+    ];
+    expect(pelangganFavoritDari(pelanggan, 6)).toHaveLength(6);
+    expect(pelangganFavoritDari(pelanggan)).toHaveLength(5);
+  });
+
+  it("mengurutkan dari omset terbesar", () => {
+    const hasil = pelangganFavoritDari([c("kecil", 1000), c("besar", 9000)], 6);
+    expect(hasil.map((h) => h.name)).toEqual(["besar", "kecil"]);
+  });
+
+  it("tidak mengubah urutan data aslinya", () => {
+    /* `sort` di tempat akan mengubah `live.customers`, dan itu dipakai ulang
+       untuk kartu lain — urutannya bisa ikut berubah tanpa disengaja. */
+    const pelanggan = [c("a", 1000), c("b", 9000), c("c", 5000)];
+    pelangganFavoritDari(pelanggan, 6);
+    expect(pelanggan.map((p) => p.name)).toEqual(["a", "b", "c"]);
+  });
+
+  it("membuang customer yang belum pernah order", () => {
+    const hasil = pelangganFavoritDari([c("baru", 9_999_999, 0), c("lama", 1000, 3)], 6);
+    expect(hasil.map((h) => h.name)).toEqual(["lama"]);
+  });
+
+  it("tidak error kalau lebih sedikit dari batas", () => {
+    expect(pelangganFavoritDari([c("satu", 1000)], 6)).toHaveLength(1);
+    expect(pelangganFavoritDari([], 6)).toEqual([]);
+  });
+
+  it("memakai jumlah order sebagai pemutus saat omset sama", () => {
+    /* Dua customer dengan omset persis sama harus punya urutan yang stabil,
+       bukan tergantung urutan acak dari server. */
+    const hasil = pelangganFavoritDari([c("jarang", 5000, 2), c("sering", 5000, 9)], 6);
+    expect(hasil.map((h) => h.name)).toEqual(["sering", "jarang"]);
   });
 });

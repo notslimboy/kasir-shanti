@@ -8,7 +8,7 @@ Aturan:
 - customer adalah nama kontak WA yang sudah berisi alamat/patokan pelanggan.
 - Jika chat menyebut harga custom seperti "Sop Iga 50K", isi kolom harga dengan 50000 dan item tetap "Sop Iga".
 - Jika chat menyebut jumlah satuan seperti "Perkedel 10 biji", isi item "Perkedel", quantity 10, dan unit "biji".
-- Jika chat menyebut porsi separuh/setengah/1/2, isi varian "Separuh" dan quantity 1.
+- Jika chat menyebut porsi separuh/setengah/1/2, isi varian "Separuh" dan quantity 1. JANGAN tulis quantity 0.5:{qty 0.5 tidak memakai harga varian "Separuh" yang punya lantai minimum Rp10.000, jadi item di bawah Rp20.000 kehilangan Rp5.000 per porsi tanpa kelihatan.}
 - Catatan seperti "sambal pisah", "tidak pakai udang", atau "caonya kotak-kotak" harus masuk ke kolom note pada item yang sesuai.
 - Instruksi kirim/pickup seperti "kirim ke Direktorat ITS", "ambil gojek", atau "titip satpam" harus masuk ke kolom sendNote, bukan note.
 - Jika ada produk yang sama tetapi memiliki catatan/varian berbeda, produk itu HARUS ditulis sebagai baris terpisah dengan catatan masing-masing. JANGAN menggabungkan kuantitasnya menjadi satu baris.
@@ -33,5 +33,6 @@ export function contohCsv(now = new Date()): string {
 "Bu Ani - Jl Melati 12","${tgl} 10.15","Tunai",10000,"Nasi Goreng Rumahan",20,"sambal pisah","kirim pos satpam"
 "Bu Ani - Jl Melati 12","${tgl} 10.15","Tunai",10000,"Nasi Goreng Seafood",5,"tidak pedas","kirim pos satpam"
 "Pak Budi - Jl Kenanga 8","${tgl} 12.03","Transfer",15000,"Nasi Goreng Jawa",10,"tidak pakai udang",""
-"Pak Budi - Jl Kenanga 8","${tgl} 12.03","Transfer",15000,"Nasi Goreng Kampung",8,"pedas sedang",""`;
+"Pak Budi - Jl Kenanga 8","${tgl} 12.03","Transfer",15000,"Nasi Goreng Kampung",8,"pedas sedang",""
+"Pak Budi - Jl Kenanga 8","${tgl} 12.03","Transfer",15000,"Nasi Goreng Jawa",1,,,"porsi separuh — dipakai varian Separuh, bukan quantity 0.5"`;
 }

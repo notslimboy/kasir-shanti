@@ -1,8 +1,9 @@
 import { describe, expect, it } from "vitest";
 
 import { kandidatJelas, kemiripanBigram, namaPokok, rankedKandidat, skorKandidat, varianDariNama, type KandidatProduk } from "./cocok-produk";
-import { blockingDraft, cocokkanDraft, rekapDraft, siapDraft, statusDraft } from "./status-draft";
+import { blockingDraft, cocokkanDraft, normalisasiSeparuh, rekapDraft, siapDraft, statusDraft } from "./status-draft";
 import type { ItemImpor, PesananImpor } from "./impor-pesanan";
+import { halfVariantPrice } from "./pricing";
 
 /* Dua aturan yang bikin fitur lama cepat dipakai:
    1. Nama dari chat WA hampir tidak pernah sama persis dengan nama menu,
@@ -11,6 +12,10 @@ import type { ItemImpor, PesananImpor } from "./impor-pesanan";
       yang memilih lewat "Pilih Barang". Salah pilih lebih mahal daripada
       memilih satu klik lagi. */
 
+/* Varian "Separuh" di katalog selalu mengikuti halfVariantPrice (menu.tsx
+   membetulkan begitu), jadi fixture memakai aturan yang sama — bukan
+   harga/2 polos. Tanpa itu test ini menguji katalog yang tidak mungkin
+   terjadi: item Rp 10.000 tidak pernah punya varian Separuh Rp 5.000. */
 const produk = (client_id: string, name: string, harga: number, akronim = ""): KandidatProduk => ({
   client_id,
   name,
@@ -19,7 +24,7 @@ const produk = (client_id: string, name: string, harga: number, akronim = ""): K
   stok: null,
   variants: [
     { name: "Normal", price: harga, pricing_type: "fixed" },
-    { name: "Separuh", price: Math.round(harga / 2), pricing_type: "fixed" },
+    { name: "Separuh", price: halfVariantPrice(harga), pricing_type: "fixed" },
     { name: "Custom input", price: 0, pricing_type: "custom" },
   ],
 });
@@ -158,6 +163,94 @@ const draft = (items: ItemImpor[], p: Partial<PesananImpor> = {}): PesananImpor 
   ...p,
 });
 
+describe("normalisasiSeparuh", () => {
+  /* Regresi nyata dari orderan/Order-tanggal 5 - 6 Okt 2026.csv:
+     "ITS J 41" menulis Lodeh Rebung sebagai quantity 0.5. */
+  const katalogSepuluh = [produk("p1", "Lodeh Rebung", 25_000), produk("p2", "Tempe Mendol", 10_000)];
+
+  it("quantity 0.5 jadi varian Separuh dengan quantity 1", () => {
+    const d = normalisasiSeparuh(
+      draft([item({ nama: "Lodeh Rebung", productClientId: "p1", productName: "Lodeh Rebung", qty: 0.5, varian: "Normal" })]),
+      katalogSepuluh,
+    );
+    expect(d.items[0].varian).toBe("Separuh");
+    expect(d.items[0].qty).toBe(1);
+    expect(d.items[0].harga).toBe(12_500);
+  });
+
+  it("harga separuh ikut lantai minimum Rp 10.000, bukan 0.5 x normal", () => {
+    /* 0.5 x 10.000 = 5.000. Itu kehilangan Rp 5.000 per porsi tanpa
+       kelihatan di struk. Varian Separuh membawa aturan halfVariantPrice. */
+    const d = normalisasiSeparuh(
+      draft([item({ nama: "Tempe Mendol", productClientId: "p2", productName: "Tempe Mendol", qty: 0.5, varian: "Normal" })]),
+      katalogSepuluh,
+    );
+    expect(d.items[0].qty).toBe(1);
+    expect(d.items[0].harga).toBe(10_000);
+  });
+
+  it("harga dari kolom harga di CSV tetap menang", () => {
+    const d = normalisasiSeparuh(
+      draft([item({ nama: "Lodeh Rebung", productClientId: "p1", productName: "Lodeh Rebung", qty: 0.5, varian: "Normal", harga: 11_000, hargaKosong: false, hargaDariCsv: true })]),
+      katalogSepuluh,
+    );
+    expect(d.items[0].harga).toBe(11_000);
+  });
+
+  it("produk yang memang sudah separuh tidak dikonversi lagi", () => {
+    const katalog = [produk("p1", "Oseng Tahu Tempe 1/2", 10_000)];
+    const d = normalisasiSeparuh(
+      draft([item({ nama: "Oseng Tahu Tempe 1/2", productClientId: "p1", productName: "Oseng Tahu Tempe 1/2", qty: 0.5, varian: "Separuh", harga: 10_000, hargaKosong: false })]),
+      katalog,
+    );
+    expect(d.items[0].qty).toBe(0.5);
+    expect(d.items[0].perluVarianSeparuh).toBeUndefined();
+  });
+
+  it("nama yang menyebut 1/2 tidak dikonversi", () => {
+    const d = normalisasiSeparuh(
+      draft([item({ nama: "Lodeh Rebung 1/2", productClientId: "p1", productName: "Lodeh Rebung", qty: 0.5, varian: "Separuh", harga: 12_500, hargaKosong: false })]),
+      katalogSepuluh,
+    );
+    expect(d.items[0].qty).toBe(0.5);
+  });
+
+  it("produk tanpa varian Separuh ditahan, tidak jatuh ke Normal", () => {
+    const katalog = [{ ...produk("p1", "Kue Lapis", 20_000), variants: [{ name: "Normal", price: 20_000, pricing_type: "fixed" as const }] }];
+    const d = normalisasiSeparuh(
+      draft([item({ nama: "Kue Lapis", productClientId: "p1", productName: "Kue Lapis", qty: 0.5, varian: "Normal", harga: 20_000, hargaKosong: false })]),
+      katalog,
+    );
+    expect(d.items[0].perluVarianSeparuh).toBe(true);
+    expect(blockingDraft(d)[0].pesan).toContain("varian Separuh tidak ada");
+    expect(statusDraft(d)).toBe("Perlu review");
+  });
+
+  it("barang yang belum cocok barang dilewati", () => {
+    const d = normalisasiSeparuh(draft([item({ nama: "Apel", qty: 0.5 })]), katalogSepuluh);
+    expect(d.items[0].qty).toBe(0.5);
+    expect(d.items[0].perluVarianSeparuh).toBeUndefined();
+  });
+
+  it("quantity lain tidak disentuh", () => {
+    const d = normalisasiSeparuh(
+      draft([item({ nama: "Lodeh Rebung", productClientId: "p1", productName: "Lodeh Rebung", qty: 1, varian: "Normal", harga: 25_000, hargaKosong: false })]),
+      katalogSepuluh,
+    );
+    expect(d.items[0].qty).toBe(1);
+    expect(d.items[0].varian).toBe("Normal");
+  });
+
+  it("subtotal dihitung ulang dari qty 1, bukan 0.5", () => {
+    const d = normalisasiSeparuh(
+      draft([item({ nama: "Lodeh Rebung", productClientId: "p1", productName: "Lodeh Rebung", qty: 0.5, varian: "Normal" })]),
+      katalogSepuluh,
+    );
+    expect(d.items[0].harga).toBe(12_500);
+    expect(d.subtotal).toBe(12_500);
+  });
+});
+
 describe("cocokkanDraft", () => {
   it("barang dicocokkan otomatis kalau kandidat tunggal", () => {
     const d = cocokkanDraft(draft([item({ nama: "Es Teh" })]), KATALOG);
@@ -180,7 +273,7 @@ describe("cocokkanDraft", () => {
     expect(statusDraft(d)).toBe("Perlu review");
   });
 
-  it("harga custom tidak ditebak — ditandai perlu dicek", () => {
+  it("harga custom tidak ditebak — dan struknya ditahan sampai diisi", () => {
     const katalogTanpaCustom = KATALOG.map((p) => ({
       ...p,
       variants: [{ name: "Custom input", price: 0, pricing_type: "custom" }],
@@ -189,8 +282,19 @@ describe("cocokkanDraft", () => {
     expect(d.items[0].productClientId).toBe("p4");
     expect(d.items[0].harga).toBe(0);
     expect(d.items[0].perluCekHarga).toBe(true);
-    // Perlu dicek bukan blocking, tapi harga kosong tetap menahan simpan.
-    expect(blockingDraft(d)).toEqual([]);
+    /* Harga custom yang belum diisi = angka yang belum dipastikan. Dulu ini
+       non-blocking, jadi struk masuk dashboard dengan harga 0. */
+    expect(blockingDraft(d)[0].pesan).toContain("harga custom");
+    expect(statusDraft(d)).toBe("Perlu review");
+  });
+
+  it("harga custom yang sudah diketik kasir lolos", () => {
+    const katalogTanpaCustom = KATALOG.map((p) => ({
+      ...p,
+      variants: [{ name: "Custom input", price: 0, pricing_type: "custom" }],
+    }));
+    const kosong = cocokkanDraft(draft([item({ nama: "Kwetiau" })]), katalogTanpaCustom);
+    const d = { ...kosong, items: [{ ...kosong.items[0], harga: 50_000, hargaKosong: false, perluCekHarga: false }] };
     expect(siapDraft(d)).toBe(true);
   });
 
@@ -217,10 +321,41 @@ describe("status draft", () => {
     expect(blockingDraft(d)[0].pesan).toContain("jumlah kosong");
   });
 
-  it("customer kosong hanya info, tidak memblokir", () => {
+  it("harga kosong = blocking", () => {
+    const d = draft([item({ productClientId: "p3", productName: "Es Teh", harga: 0, hargaKosong: true })]);
+    expect(blockingDraft(d)[0].pesan).toContain("harga belum diisi");
+    expect(statusDraft(d)).toBe("Perlu review");
+  });
+
+  it("harga kosong tetap blocking walau flag hargaKosong lupa di-set", () => {
+    /* Dua sumber kebenaran (harga dan flag) bisa tidak sinkron kalau ada
+       kode yang menulis salah satu saja. Cek keduanya. */
+    const d = draft([item({ productClientId: "p3", productName: "Es Teh", harga: 0, hargaKosong: false })]);
+    expect(blockingDraft(d)[0].pesan).toContain("harga belum diisi");
+  });
+
+  it("customer kosong = blocking", () => {
     const d = draft([item({ productClientId: "p3", productName: "Es Teh", harga: 5_000, hargaKosong: false })], { customer: "" });
-    expect(blockingDraft(d)).toEqual([]);
-    expect(statusDraft(d)).toBe("Siap");
+    expect(blockingDraft(d)[0].pesan).toContain("Customer/alamat kosong");
+    expect(statusDraft(d)).toBe("Perlu review");
+  });
+
+  it("tanggal kosong = blocking", () => {
+    const d = draft([item({ productClientId: "p3", productName: "Es Teh", harga: 5_000, hargaKosong: false })], { tanggal: "" });
+    expect(blockingDraft(d)[0].pesan).toContain("Tanggal chat kosong");
+  });
+
+  it("satu item bermasalah menahan seluruh struk", () => {
+    /* 10 struk dengan 3 bermasalah: 7 yang lolos. Yang 3 tidak boleh ikut
+       ke dashboard walau itemnya yang lain sudah aman. */
+    const ItemES = (harga: number, hargaKosong: boolean) =>
+      item({ productClientId: "p3", productName: "Es Teh", harga, hargaKosong });
+    const aman = draft([ItemES(5_000, false)], { baris: 1 });
+    const rusak = draft([ItemES(5_000, false), ItemES(0, true)], { baris: 2 });
+    const r = rekapDraft([aman, aman, aman, rusak, rusak, rusak]);
+    /* itemSiap 3, bukan 6: draft yang bermasalah tidak menyumbang item
+       sama sekali, itulah yang membuat struknya tidak ikut ke dashboard. */
+    expect(r).toEqual({ semua: 6, perluReview: 3, siap: 3, itemSiap: 3 });
   });
 
   it("rekap menghitung semua / perlu review / siap", () => {
