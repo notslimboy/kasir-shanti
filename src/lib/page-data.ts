@@ -36,6 +36,21 @@ export type Customer = {
 
 /* ============ KERANJANG & HOLD ============ */
 
+/** "c1902" -> 1902. Id customer di UI sengaja diberi awalan "c" supaya
+ *  tidak pernah sama dengan id struk atau id produk di daftar yang sama.
+ *  Menulis ke server butuh id numerik aslinya, jadi konversi ini dijalankan
+ *  di satu tempat — bukan `parseInt` yang disebar di tiap pemanggil.
+ *
+ *  Mengembalikan null kalau bukan bentuk "c<angka>". customer contoh dari
+ *  `contoh-impor.ts` dan fixture E2E memakai id bebas, dan menuliskan id itu
+ *  ke server akan menimpa baris yang salah. */
+export function idNumerikCustomer(id: string): number | null {
+  const cocok = /^c(\d+)$/.exec(String(id ?? ""));
+  if (!cocok) return null;
+  const angka = Number(cocok[1]);
+  return Number.isSafeInteger(angka) ? angka : null;
+}
+
 export type CartItem = {
   id: string;
   name: string;

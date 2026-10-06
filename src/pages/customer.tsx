@@ -14,8 +14,13 @@ import {
   inputClass,
 } from "@/components/ui/kit";
 import type { Customer } from "@/lib/page-data";
+import { idNumerikCustomer } from "@/lib/page-data";
 import { useData } from "@/lib/data-source";
 import { rupiahShort } from "@/lib/format";
+import { SortableTh, urutkan, useUrutan } from "@/components/ui/sortable-table";
+import { tanggalPendekKeWaktu } from "@/lib/tanggal-pendek";
+import { ubahCustomer } from "@/lib/supabase-tulis";
+import { galatValidasi, type GalatTulis } from "@/lib/galat-tulis";
 
 /* ==========================================================================
    Data Customer — 318 customer, alias, tag, ongkir default, deposit.
@@ -40,6 +45,36 @@ type Draft = {
 /** Nilai tag khusus untuk customer tanpa area/franchise. */
 const TANPA_TAG = "Tanpa Tag";
 
+/* Nilai yang dipakai `urutkan` untuk tiap kolom.
+ *
+ * `tag` kosong harus jadi null, bukan "": `urutkan` melempar nilai kosong ke
+ * ekor daftar secara terpisah dari arah, jadi "" akan ikut terbawa sebagai
+ * nilai terkecil dan menduduki posisi pertama saat urutan naik. 118 dari 318
+ * customer tidak punya tag, jadi ini bukan kasus tepi.
+ *
+ * `terakhir` dikembalikan sebagai Date, bukan string "4 Juli 2026".
+ * `localeCompare` akan membandingkan karakter, dan "4 Juli" selalu mendahului
+ * "30 September" karena "4" lebih kecil dari "3" — urutan naiknya terbalik.
+ * `tanggalPendekKeWaktu` mengubahnya kembali jadi waktu yang bisa dibandingkan. */
+function kolomNilai(c: Customer, kolom: string): string | number | Date | null {
+  switch (kolom) {
+    case "customer":
+      return c.name;
+    case "tag":
+      return c.tag ? c.tag : null;
+    case "order":
+      return c.orderCount;
+    case "total":
+      return c.total;
+    case "deposit":
+      return c.deposit;
+    case "terakhir":
+      return tanggalPendekKeWaktu(c.lastOrder);
+    default:
+      return null;
+  }
+}
+
 export function CustomerPage() {
   const live = useData();
 
@@ -56,16 +91,31 @@ export function CustomerPage() {
   const [openId, setOpenId] = useState<string | null>(null);
   const [draft, setDraft] = useState<Draft | null>(null);
   const [tersimpan, setTersimpan] = useState(false);
+  /* Dua state yang tidak bisa disatukan dengan `tersimpan`: `menyimpan`
+     masih ada request yang jalan, `galatSimpan` sudah tahu hasilnya gagal.
+     "Tersimpan" hanya boleh tampil setelah server mengonfirmasi. */
+  const [menyimpan, setMenyimpan] = useState(false);
+  const [galatSimpan, setGalatSimpan] = useState<GalatTulis | null>(null);
 
   const cocokTag = (c: Customer) =>
     tag === "semua" || (tag === "__tanpa" ? !c.tag : c.tag === tag);
 
-  const rows = aktif.filter(
-    (c) =>
-      cocokTag(c) &&
-      (q === "" ||
-        c.name.toLowerCase().includes(q.toLowerCase()) ||
-        c.address.toLowerCase().includes(q.toLowerCase())),
+  const { urutan, toggle } = useUrutan();
+
+  /* Saring dulu, baru urutkan — bukan sebaliknya. Urutan bawaan halaman
+     ini sudah alphabetic dari server, dan itu yang dilihat kasir sebelum
+     menyentuh header apa pun; tahap "lepas" di `arahBerikutnya`
+     mengembalikannya ke sana, bukan ke urutan yang lain. */
+  const rows = urutkan(
+    aktif.filter(
+      (c) =>
+        cocokTag(c) &&
+        (q === "" ||
+          c.name.toLowerCase().includes(q.toLowerCase()) ||
+          c.address.toLowerCase().includes(q.toLowerCase())),
+    ),
+    urutan,
+    kolomNilai,
   );
 
   const totalOrder = aktif.reduce((a, c) => a + c.orderCount, 0);
@@ -119,8 +169,50 @@ export function CustomerPage() {
     setDraft(null);
   };
 
-  const simpan = () => {
-    if (!draft || !openId) return;
+  /* Simpan harus sampai ke server dulu, baru ke state lokal.
+   *
+     Versi sebelumnya hanya memanggil setSunting — tidak ada fetch sama
+     sekali. Daftar berubah seketika, jadi kelihatan berhasil, tapi begitu
+     halaman dimuat ulang `live.customers` membawa data dari server dan
+     semua ketikan hilang. Worse: kasir mengira nomornya sudah tersimpan,
+     padahal tidak ada yang berubah di mana pun.
+   *
+     Urutannya sekarang: tulis ke Supabase, dan hanya kalau hasilnya ok
+     daftar lokal ikut berubah. Kalau gagal, drawer tetap terbuka dengan
+     pesan errornya — lebih baik kasir melihat kegagalan daripada menyimpan
+     optimism yang hilang saat reload. */
+  const simpan = async () => {
+    if (!draft || !openId || menyimpan) return;
+
+    const dbId = idNumerikCustomer(openId);
+    if (dbId === null) {
+      setGalatSimpan(
+        galatValidasi("Customer ini belum punya id database, jadi tidak bisa disimpan."),
+      );
+      return;
+    }
+
+    setMenyimpan(true);
+    setGalatSimpan(null);
+    const hasil = await ubahCustomer({
+      id: dbId,
+      name: draft.name,
+      tag: draft.tag === TANPA_TAG ? null : draft.tag,
+      deposit: draft.deposit,
+      ongkir: draft.ongkir,
+    });
+    setMenyimpan(false);
+
+    if (!hasil.ok) {
+      setGalatSimpan({
+        judul: hasil.judul ?? "Gagal menyimpan",
+        penjelasan: hasil.penjelasan ?? hasil.pesan,
+        langkah: hasil.langkah ?? "Coba lagi. Kalau tetap gagal, hubungi pemilik aplikasi.",
+        ...(hasil.teknis ? { teknis: hasil.teknis } : {}),
+      });
+      return;
+    }
+
     setSunting(
       (all) =>
         (all ?? daftar).map((c) =>
@@ -128,11 +220,9 @@ export function CustomerPage() {
             ? {
                 ...c,
                 name: draft.name.trim() || c.name,
-                address: draft.address.trim(),
                 tag: draft.tag === TANPA_TAG ? null : draft.tag,
                 deposit: draft.deposit,
                 ongkir: draft.ongkir,
-                note: draft.note,
               }
             : c,
         ),
@@ -192,12 +282,41 @@ export function CustomerPage() {
           <table className="w-full min-w-[720px] text-sm">
             <thead>
               <tr className="border-b border-border text-left text-[11px] uppercase tracking-wider text-muted-foreground">
-                <th className="pb-2 font-semibold">Customer</th>
-                <th className="pb-2 font-semibold">Tag</th>
-                <th className="pb-2 text-right font-semibold">Order</th>
-                <th className="pb-2 pr-4 text-right font-semibold">Total Belanja</th>
-                <th className="pb-2 pl-4 pr-4 text-right font-semibold">Deposit</th>
-                <th className="pb-2 pl-4 font-semibold">Order Terakhir</th>
+                <SortableTh kolom="customer" urutan={urutan} onToggle={toggle}>
+                  Customer
+                </SortableTh>
+                <SortableTh kolom="tag" urutan={urutan} onToggle={toggle}>
+                  Tag
+                </SortableTh>
+                <SortableTh kolom="order" urutan={urutan} onToggle={toggle} align="right">
+                  Order
+                </SortableTh>
+                <SortableTh
+                  kolom="total"
+                  urutan={urutan}
+                  onToggle={toggle}
+                  align="right"
+                  className="pr-4"
+                >
+                  Total Belanja
+                </SortableTh>
+                <SortableTh
+                  kolom="deposit"
+                  urutan={urutan}
+                  onToggle={toggle}
+                  align="right"
+                  className="pl-4 pr-4"
+                >
+                  Deposit
+                </SortableTh>
+                <SortableTh
+                  kolom="terakhir"
+                  urutan={urutan}
+                  onToggle={toggle}
+                  className="pl-4"
+                >
+                  Order Terakhir
+                </SortableTh>
               </tr>
             </thead>
             <tbody>
@@ -338,36 +457,73 @@ export function CustomerPage() {
         title="Ubah Data Customer"
         subtitle={draft?.name}
         footer={
-          <div className="flex items-center gap-2">
-            <AnimatePresence mode="wait" initial={false}>
-              {tersimpan && (
-                <motion.span
-                  key="ok"
-                  initial={{ opacity: 0, scale: 0.7 }}
-                  animate={{ opacity: 1, scale: 1 }}
-                  exit={{ opacity: 0, scale: 0.7 }}
-                  transition={{ type: "spring", stiffness: 500, damping: 22 }}
-                  className="inline-flex h-11 items-center gap-1.5 rounded-full bg-primary px-3.5 text-xs font-bold text-primary-foreground"
-                >
-                  ✓ Tersimpan
-                </motion.span>
-              )}
-            </AnimatePresence>
-            <button
-              onClick={tutup}
-              disabled={tersimpan}
-              className={btnGhost + " disabled:opacity-40"}
-            >
-              Batal
-            </button>
-            <motion.button
-              onClick={simpan}
-              disabled={tersimpan}
-              whileTap={{ scale: 0.96 }}
-              className={btnPrimary + " disabled:opacity-40"}
-            >
-              Simpan
-            </motion.button>
+          <div className="space-y-2">
+            {/* Error tidak pernah disembunyikan di balik "Tersimpan".
+                Kegagalan menulis harus kelihatan selama drawenya masih
+                terbuka — kalau tidak, kasir menekan Simpan, melihat
+               daftar berubah, lalu reload dan menemukan semua hilang. */}
+            {/* Error ditampilkan berjenjang, bukan sebagai satu blok merah.
+                Yang dibaca kasir cuma judulnya: "Nama itu sudah dipakai".
+                Penjelasan dan langkah menyusul, dan detail Postgres yang
+                tidak berarti apa-apa bagi kasir disimpan di paling bawah
+                dengan huruf kecil — tetap ada untuk developer,
+                tapi tidak memenuhi layar. */}
+            {galatSimpan && (
+              <div
+                role="alert"
+                className="rounded-2xl bg-destructive/10 px-3.5 py-3 text-destructive"
+              >
+                <p className="text-sm font-bold">{galatSimpan.judul}</p>
+                <p className="mt-1 text-xs">{galatSimpan.penjelasan}</p>
+                <p className="mt-1.5 text-xs font-semibold">{galatSimpan.langkah}</p>
+                {galatSimpan.teknis && (
+                  <p className="mt-2 break-words font-mono text-[10px] opacity-70">
+                    {galatSimpan.teknis}
+                  </p>
+                )}
+              </div>
+            )}
+            <div className="flex items-center gap-2">
+              <AnimatePresence mode="wait" initial={false}>
+                {tersimpan ? (
+                  <motion.span
+                    key="ok"
+                    initial={{ opacity: 0, scale: 0.7 }}
+                    animate={{ opacity: 1, scale: 1 }}
+                    exit={{ opacity: 0, scale: 0.7 }}
+                    transition={{ type: "spring", stiffness: 500, damping: 22 }}
+                    className="inline-flex h-11 items-center gap-1.5 rounded-full bg-primary px-3.5 text-xs font-bold text-primary-foreground"
+                  >
+                    ✓ Tersimpan
+                  </motion.span>
+                ) : menyimpan ? (
+                  <motion.span
+                    key="jalan"
+                    initial={{ opacity: 0 }}
+                    animate={{ opacity: 1 }}
+                    exit={{ opacity: 0 }}
+                    className="inline-flex h-11 items-center gap-1.5 px-1 text-xs font-semibold text-muted-foreground"
+                  >
+                    Menyimpan…
+                  </motion.span>
+                ) : null}
+              </AnimatePresence>
+              <button
+                onClick={tutup}
+                disabled={tersimpan || menyimpan}
+                className={btnGhost + " disabled:opacity-40"}
+              >
+                Batal
+              </button>
+              <motion.button
+                onClick={simpan}
+                disabled={tersimpan || menyimpan}
+                whileTap={{ scale: 0.96 }}
+                className={btnPrimary + " disabled:opacity-40"}
+              >
+                Simpan
+              </motion.button>
+            </div>
           </div>
         }
       >

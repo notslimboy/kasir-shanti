@@ -1,9 +1,18 @@
 import { headerRest, SUPABASE_URL } from "@/supabase/client";
+import { rapikanCatatan } from "./catatan-item";
+import { jelaskanGalatTulis, type GalatTulis, galatValidasi } from "./galat-tulis";
+
+/** Sama seperti dipakai di seluruh lapisan data: angka null/undefined/NaN
+ *  harus jadi 0, bukan membuat seluruh total NaN diam-diam. */
+const n = (v: unknown): number => {
+  const x = Number(v ?? 0);
+  return Number.isFinite(x) ? x : 0;
+};
 
 /* ==========================================================================
    Menulis struk ke Supabase.
 
-   Tiga operasi: hapus (void), restore, dan hapus permanen.
+   Empat operasi: ubah isi struk, hapus (void), restore, dan hapus permanen.
 
    Kenapa "hapus" itu SOFTWARE delete lewat `deleted_at`, bukan `DELETE FROM`:
 
@@ -23,7 +32,20 @@ import { headerRest, SUPABASE_URL } from "@/supabase/client";
    dan menyentuhinya dari sini akan mengembalikan jumlah dua kali.
    */
 
-export type HasilTulis = { ok: true } | { ok: false; pesan: string };
+export type HasilTulis =
+  | { ok: true }
+  | {
+      ok: false;
+      /** Satu kalimat utuh, untuk pemanggil yang hanya butuh teks. */
+      pesan: string;
+      /** Bagian yang bisa ditampilkan sendiri oleh pemanggil. Opsional
+       *  supaya pemanggil lama yang cuma baca `pesan` tetap jalan. */
+      judul?: string;
+      penjelasan?: string;
+      langkah?: string;
+      /** Kode dan pesan server apa adanya, untuk developer. */
+      teknis?: string;
+    };
 
 async function patchStruk(id: number, body: Record<string, unknown>): Promise<HasilTulis> {
   const url = `${SUPABASE_URL}/rest/v1/sales?id=eq.${id}`;
@@ -49,6 +71,180 @@ async function patchStruk(id: number, body: Record<string, unknown>): Promise<Ha
   return { ok: true };
 }
 
+/* -------------------------------------------------------------------------
+   Ubah isi struk
+
+   Menulis `sales` dan `sale_items` untuk struk yang sudah ada. Dua hal yang
+   bikin operasi ini rawan, dan keduanya ditangani di bawah:
+
+   1. Baris item dicocokkan lewat `sale_items.id`, bukan nama + varian.
+      Satu menu bisa muncul dua kali dalam struk yang sama dengan varian
+      berbeda, dan begitu namanya diedit keduanya bisa sama persis.
+   2. Mengubah qty atau harga mengubah total. `paid_amount` sengaja TIDAK
+      ikut disentuh: kalau harga naik, `paid_amount < total` dan struk
+      otomatis berubah jadi "Belum Lunas" — dan itu informasi yang harus
+      dilihat kasir, bukan sesuatu yang dibetulkan diam-diam di sini.
+      Panggilannya wajib memberi tahu kalau hal ini terjadi.
+   ------------------------------------------------------------------------- */
+
+export type BarisUbah = {
+  /** id baris `sale_items`. Wajib — tanpa ini baris tidak bisa ditulis. */
+  id: number;
+  qty: number;
+  price: number;
+  note: string;
+};
+
+export type UbahStrukInput = {
+  saleId: number;
+  customer: string;
+  sendNote: string;
+  lines: BarisUbah[];
+  /** Ongkir dan diskon tidak bisa diedit dari sini; dipakai untuk menghitung
+   *  total yang sama seperti `simpanPenjualan`. */
+  ongkir: number;
+  diskon: number;
+};
+
+export type HasilUbah = {
+  ok: boolean;
+  pesan?: string;
+  subtotal?: number;
+  total?: number;
+  /** True kalau total berubah cukup jauh sehingga status lunas ↔ belum ikut
+   *  berubah. Panggilannya wajib memberi tahu kasir. */
+  statusBerubah?: boolean;
+  /** Baris yang dibuang karena qty-nya dikasih 0. */
+  dibuang?: number;
+};
+
+/** Baris yang qty-nya 0 dibuang: struk dengan baris nol akan tercetak sia-sia
+ *  dan tercatat di KOT sebagai pesanan yang tidak ada. */
+export function bagiBarisUbah(
+  lines: BarisUbah[],
+): { disimpan: BarisUbah[]; dibuang: number } {
+  const disimpan = lines.filter((l) => Number(l.qty) > 0);
+  return { disimpan, dibuang: lines.length - disimpan.length };
+}
+
+export async function ubahStruk(input: UbahStrukInput): Promise<HasilUbah> {
+  const { disimpan, dibuang } = bagiBarisUbah(input.lines);
+
+  /* Baris tanpa id berarti form-nya dibangun dari sumber yang tidak punya
+     primary key. Menjalankan PATCH dengan `id=eq.undefined` akan menimpa
+     baris acak, jadi berhenti di sini. */
+  const tanpaId = disimpan.filter((l) => !Number.isFinite(l.id) || l.id <= 0);
+  if (tanpaId.length > 0) {
+    return { ok: false, pesan: "Ada baris item tanpa id — muat ulang struk lalu coba lagi." };
+  }
+  if (disimpan.length === 0) {
+    return {
+      ok: false,
+      pesan: "Semua item&qty 0. Struk tidak bisa disimpan kosong — batalkan struknya dari menu Penjualan.",
+    };
+  }
+
+  const subtotal = disimpan.reduce((a, l) => a + Math.max(0, n(l.price)) * Math.max(0, n(l.qty)), 0);
+  const total = Math.max(0, subtotal - Math.max(0, n(input.diskon)) + Math.max(0, n(input.ongkir)));
+
+  /* Cek dulu total lama, supaya `statusBerubah` bisa dilaporkan dan PATCH
+     tidak diam-diam menimpa `paid_amount`. */
+  let totalLama = 0;
+  let sudahLunas = false;
+  try {
+    const cek = await fetch(
+      `${SUPABASE_URL}/rest/v1/sales?id=eq.${input.saleId}&select=total,paid_amount`,
+      { headers: { ...headerRest(), Prefer: "return=representation" } },
+    );
+    if (cek.ok) {
+      const baris = (await cek.json()) as { total: number; paid_amount: number }[];
+      totalLama = n(baris[0]?.total);
+      sudahLunas = n(baris[0]?.paid_amount) >= totalLama && totalLama > 0;
+    }
+  } catch {
+    /* Gagal membaca tidak boleh memblokir penulisan; statusBerubah ditulis
+       false dan pemanggil tetap menyimpan. */
+  }
+  const masihLunas = total > 0 && Math.max(totalLama, 0) > 0 && sudahLunas && total <= totalLama;
+
+  try {
+    /* 1. Header struk. `paid_amount` tidak disentuh — lihat catatan (2). */
+    const hasilHeader = await patchStruk(input.saleId, {
+      customer_name: String(input.customer || "").trim(),
+      send_note: rapikanCatatan(String(input.sendNote ?? "")) ?? "",
+      subtotal,
+      total,
+    });
+    if (!hasilHeader.ok) return { ok: false, pesan: hasilHeader.pesan };
+
+    /* 2. Baris yang dihapus (qty jadi 0). Dilakukan lebih dulu supaya tidak
+          ada baris dengan qty 0 tertinggal kalau salah satu PATCH di bawah
+          gagal — struk seperti itu tercetak sia-sia dan muncul di KOT. */
+    const idDibuang = input.lines
+      .filter((l) => !(Number(l.qty) > 0))
+      .map((l) => l.id)
+      .filter((id) => Number.isFinite(id) && id > 0);
+    if (idDibuang.length > 0) {
+      const hapus = await fetch(
+        `${SUPABASE_URL}/rest/v1/sale_items?id=in.(${idDibuang.join(",")})`,
+        { method: "DELETE", headers: { ...headerRest(), Prefer: "return=minimal" } },
+      );
+      if (!hapus.ok) {
+        return { ok: false, pesan: `Gagal membuang item qty 0 (${hapus.status}).` };
+      }
+    }
+
+    /* 3. Baris yang tersisa. Satu permintaan per baris: PostgREST tidak punya
+          UPDATE per-id dalam satu panggilan, dan jumlah baris struk kecil. */
+    for (const l of disimpan) {
+      const harga = Math.max(0, n(l.price));
+      const qty = Math.max(0, n(l.qty));
+      const hasil = await patchItem([l.id], {
+        quantity: qty,
+        price: harga,
+        line_total: harga * qty,
+        /* `rapikanCatatan`, bukan `trim()`. Catatan item punya satu normalisasi
+       di seluruh aplikasi — dipakai keranjang kasir juga — supaya "  bnyak "
+       dan "bnyak" tidak menjadi dua isi berbeda di KOT dan struk. */
+        note: rapikanCatatan(String(l.note ?? "")) ?? "",
+      });
+      if (!hasil.ok) return { ok: false, pesan: hasil.pesan };
+    }
+  } catch (e) {
+    return { ok: false, pesan: `Gagal menyimpan perubahan: ${(e as Error).message}` };
+  }
+
+  return {
+    ok: true,
+    subtotal,
+    total,
+    dibuang,
+    statusBerubah: sudahLunas && !masihLunas && total > totalLama,
+  };
+}
+
+/** PATCH satu atau lebih `sale_items` sekaligus. Kosong = tidak ada yang
+ *  perlu ditulis, jadi tidak ada permintaan yang dikirim. */
+async function patchItem(ids: number[], body: Record<string, unknown>): Promise<HasilTulis> {
+  if (ids.length === 0) return { ok: true };
+  const url = `${SUPABASE_URL}/rest/v1/sale_items?id=in.(${ids.join(",")})`;
+  const r = await fetch(url, {
+    method: "PATCH",
+    headers: {
+      ...headerRest(),
+      "Content-Type": "application/json",
+      Prefer: "return=representation",
+    },
+    body: JSON.stringify(body),
+  });
+  if (!r.ok) return { ok: false, pesan: `Gagal menyimpan item struk (${r.status}).` };
+  const data = (await r.json()) as unknown[];
+  if (!Array.isArray(data) || data.length === 0) {
+    return { ok: false, pesan: "Item struk tidak ditemukan di server." };
+  }
+  return { ok: true };
+}
+
 /** Tandai struk terhapus (void). */
 export function hapusStruk(id: number): Promise<HasilTulis> {
   return patchStruk(id, {
@@ -63,6 +259,115 @@ export function restoreStruk(id: number): Promise<HasilTulis> {
     deleted_at: null,
     stock_restored_on_delete: 0,
   });
+}
+
+/* -------------------------------------------------------------------------
+   Ubah data customer
+
+   Tabel `customers` tidak punya kolom alamat maupun catatan. Alamat muncul
+   di `sales.customer_address` per struk, jadi tidak ada satu tempat untuk
+   menyimpannya di sini — lihat mapCustomer di live-mappers.ts. Karena itu
+   `UbahCustomerInput` sengaja tidak punya field itu: menerima
+   address yang tidak bisa ditulis akan membuat drawer/DVD ini melaporkan
+   "Tersimpan" padahal tidak ada yang berubah.
+
+   Kolom yang bisa ditulis dari form Ubah Data Customer:
+
+     name             -> name
+     tag              -> tag              (null = Tanpa Tag)
+     deposit          -> deposit_balance
+     ongkir           -> default_shipping
+
+   `last_order_at` tidak disentuh: itu diturunkan dari struk, bukan dari
+   ketikan kasir.
+   ------------------------------------------------------------------------- */
+
+export type UbahCustomerInput = {
+  /** id numerik baris `customers`, bukan id berawalan "c". */
+  id: number;
+  name: string;
+  /** null = tanpa area/franchise. */
+  tag: string | null;
+  deposit: number;
+  ongkir: number;
+};
+
+export async function ubahCustomer(input: UbahCustomerInput): Promise<HasilTulis> {
+  const nama = String(input.name ?? "").trim();
+  if (!nama) {
+    return gabungPesan(galatValidasi("Nama customer tidak boleh kosong."));
+  }
+  const tag = input.tag && String(input.tag).trim() ? String(input.tag).trim() : null;
+
+  const url = `${SUPABASE_URL}/rest/v1/customers?id=eq.${input.id}`;
+  let r: Response;
+  try {
+    r = await fetch(url, {
+      method: "PATCH",
+      headers: {
+        ...headerRest(),
+        "Content-Type": "application/json",
+        Prefer: "return=representation",
+      },
+      body: JSON.stringify({
+        name: nama,
+        tag,
+        deposit_balance: n(input.deposit),
+        default_shipping: n(input.ongkir),
+        updated_at: new Date().toISOString(),
+      }),
+    });
+  } catch (e) {
+    /* `fetch` melempal error kalau tidak ada koneksi — DNS gagal,
+       offline, CORS ditolak. Tanpa catch di sini, yang muncul di layar
+       bukan pesan melainkan unhandled rejection, dan kasir berakhir reload
+      melihat data lamanya tanpa tahu kenapa. */
+    const offline: GalatTulis = {
+      judul: "Tidak ada koneksi ke server",
+      penjelasan: "Perangkat ini tidak bisa menghubungi server. Data lu belum tersimpan.",
+      langkah: "Cek internet, lalu tekan Simpan lagi.",
+      teknis: String(e),
+    };
+    return gabungPesan(offline);
+  }
+
+  if (!r.ok) {
+    return gabungPesan(await jelaskan(r, nama));
+  }
+  /* PATCH dengan filter yang tidak cocok mengembalikan array kosong, bukan
+     error. Kalau begitu tidak ada yang berubah — dan itu harus dilaporkan,
+     bukan dianggap berhasil. */
+  const data = (await r.json()) as unknown[];
+  if (!Array.isArray(data) || data.length === 0) {
+    return gabungPesan(jelaskanGalatTulis(404, null, nama));
+  }
+  return { ok: true };
+}
+
+/** Bentuk hasil dari `jelaskanGalatTulis`: `pesan` dibuat dari bagian-bagian
+ *  supaya pemanggil lama yang cuma menampilkan satu string tetap punya
+ *  kalimat lengkap, sementara pemanggil baru bisa menampilkannya berjenjang. */
+function gabungPesan(g: GalatTulis): HasilTulis {
+  return {
+    ok: false,
+    judul: g.judul,
+    penjelasan: g.penjelasan,
+    langkah: g.langkah,
+    ...(g.teknis ? { teknis: g.teknis } : {}),
+    pesan: `${g.judul}. ${g.penjelasan} ${g.langkah}`,
+  };
+}
+
+/** Baca body error server lalu petakan jadi kalimat manusia. Body dibaca
+ *  satu kali: `r.json()` hanya bisa dipanggil sekali. */
+async function jelaskan(r: Response, nama: string): Promise<GalatTulis> {
+  let body: unknown = null;
+  try {
+    body = await r.json();
+  } catch {
+    body = null;
+  }
+  return jelaskanGalatTulis(r.status, body, nama);
 }
 
 /* -------------------------------------------------------------------------

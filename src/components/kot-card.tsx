@@ -36,6 +36,11 @@ export function KotCard({
   const kosong = ticket.itemTotals.length === 0;
   const adaCatatan = ticket.notedItems.length > 0;
 
+  /* itemTotals sudah terurut qty terbesar dulu (lihat lib/kot.ts), jadi
+     entri pertama adalah puncak. Bar proporsi diukur terhadap itu, bukan
+     terhadap total: "26x" jadi 100%, "4x" jadi 15%. */
+  const puncak = ticket.itemTotals[0]?.quantity || 1;
+
   const cetak = () => {
     setMencetak(true);
     setTimeout(() => {
@@ -66,9 +71,11 @@ export function KotCard({
         }
       >
         <div className="flex h-full flex-col gap-2">
-          <p className="text-xs text-muted-foreground">
-            Rekap per menu untuk {ticket.dateLabel}. Ikut rentang tanggal dan filter
-            customer di atas.
+          {/* Dua kalimat versi lama jadi dua baris penuh di layar 390px —
+              ruang yang lebih mahal daripada satu item menu. Angkanya sudah
+              ada di pill header, jadi tidak perlu diulang. */}
+          <p className="text-[11px] leading-snug text-muted-foreground lg:text-xs">
+            Rekap {ticket.dateLabel} · ikut rentang & filter customer
           </p>
 
           {/* min-h-0 wajib: tanpa itu, flex anak melar dan tidak pernah
@@ -86,10 +93,28 @@ export function KotCard({
                   animate={{ opacity: 1, x: 0 }}
                   exit={{ opacity: 0 }}
                   transition={{ type: "spring", stiffness: 420, damping: 32 }}
-                  className="flex items-baseline gap-2 rounded-xl bg-muted/60 px-3 py-2"
+                  /* `relative` + `overflow-hidden` itu pasangan yang
+                     membuat isian proporsi terpotong mengikuti radius chip.
+                     Tanpa `relative`, lebar diukur dari kartu; tanpa
+                     `overflow-hidden`, sudutnya keluar dari radius dan
+                     chip terlihat kotak di atas, bulat di bawah. */
+                  className="relative flex items-baseline gap-2 overflow-hidden rounded-xl bg-muted/60 px-3 py-2"
                 >
-                  <span className="min-w-0 flex-1 truncate text-sm">{it.name}</span>
-                  <span className="shrink-0 text-sm font-bold figure">
+                  {/* Isian proporsi. Baris KOT ini sudah berurutan qty
+                      terbesar dulu, tapi urutan saja tidak terasa saat mata
+                      memindai cepat — yang terasa adalah panjang. Ruang
+                      tengah yang tadinya kosong sekarang dipakai: pada
+                      26x isiannya penuh, pada 1x cuma 12% dan sisanya
+                      tetap `bg-muted/60` yang lembut itu. */}
+                  <span
+                    aria-hidden
+                    className="absolute inset-y-0 left-0 rounded-r-[10px] bg-primary/12"
+                    style={{ width: `${Math.max(12, (it.quantity / puncak) * 100)}%` }}
+                  />
+                  <span className="relative min-w-0 flex-1 truncate text-sm" title={it.name}>
+                    {it.name}
+                  </span>
+                  <span className="relative shrink-0 text-sm font-bold figure">
                     {formatQtyDapur(it.quantity)}x
                   </span>
                 </motion.li>
@@ -111,13 +136,11 @@ export function KotCard({
               membutuhkan catatan adalah dapur saat kertas dicetak — di layar
               hanya menambah tinggi kartu dan mengambil ruang untuk info yang
               sudah ada di struk. Bagian CATATAN ITEM tetap ada di printout
-              (lihat pratinjau di bawah). */}
-          <div className="flex shrink-0 items-center justify-between gap-2 border-t border-border pt-2">
-            <span className="text-[11px] font-bold uppercase tracking-wider text-muted-foreground">
-              Total item
-            </span>
-            <span className="text-base font-bold figure">{formatQtyDapur(ticket.itemCount)}</span>
-          </div>
+              (lihat pratinjau di bawah).
+
+              Strip "Total item" yang pernah ada di sini dihapus: angkanya
+              persis sama dengan pill di header (`ticket.itemCount`), jadi
+              yang hilang cuma satu baris dan satu pengulangan. */}
 
           <motion.button
             onClick={() => setPratinjau(true)}

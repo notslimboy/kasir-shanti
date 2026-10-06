@@ -105,6 +105,13 @@ snapshot in this repo anymore. If sources conflict, never pick silently — use
 - Forbidden examples: `Pantai Mentari SF 9` must not become `ITS U 9`; `H 18`
   must not become `Villa Royal C4/18`; `Tohir 23` must not become `BPD B/23`;
   `Sutorejo 2/6` must not become `Kalijudan 2/6`.
+- **Digits identify the unit and are never negotiable.** `ITS U 180` and
+  `ITS U 80` are two different units and two different people. Spelling,
+  spacing, punctuation, and case may be normalized; a number may not be
+  shortened, extended, or matched loosely. `U 180` may resolve to `ITS U 180`
+  because the letters and all numbers agree. `U 180` must never resolve to
+  `ITS U 80` — and never to `ITS U 1800`. When the numbers disagree, the
+  answer is `[PERLU REVIEW]`, never the closest match.
 - `customer-terdeteksi.csv` is safe only at status
   `UNIQUE_STRICT_MATCH_AI_CONFIRM`. Status `UNMATCHED_AI_REVIEW` or
   `AMBIGUOUS_EXACT_AI_REVIEW` must be reviewed, never forced.
@@ -144,8 +151,17 @@ snapshot in this repo anymore. If sources conflict, never pick silently — use
   `Mendoan` and `Mendol`. An uncertain item becomes
   `[PERLU REVIEW] <raw item>`.
 - A clear item without a quantity means `1`. Quantity must be numeric.
-- Half portions use the official variant when available; otherwise use the full
-  item with quantity `0.5` and note `setengah porsi` if needed.
+- Half portions use the official variant: `varian` = `Separuh`, `quantity` = `1`.
+  Never write `quantity 0.5`. The 9-column format has no `varian` column, so a
+  half portion cannot be expressed at all — write the full item name and put
+  `setengah porsi` in `note`. The app converts the note, reads the `Separuh`
+  variant price from its menu, and holds the draft when the menu has no
+  `Separuh` variant.
+
+  Reason, do not "simplify" this: the `Separuh` variant has a Rp 10.000 floor
+  (`halfVariantPrice`). `quantity 0.5` times the normal price skips that floor,
+  so every half portion of an item under Rp 20.000 loses Rp 5.000 silently.
+  `Tempe Mendol` 10.000 becomes 5.000 instead of 10.000.
 - The `Jumbo` variant is used only when it exists in the menu; if not, write
   `porsi jumbo` in `note`.
 - The same item with a different note must become separate rows. If a note

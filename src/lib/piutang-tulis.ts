@@ -1,6 +1,7 @@
 import { SUPABASE_URL, headerRest } from "@/supabase/client";
 import type { SalePaymentRow, SaleRow } from "@/supabase/types";
 import { penyesuaianDeposit, sisaPiutang } from "./piutang";
+import { paidSetelahBatal, pilihCustomer, type CustomerDeposit } from "./customer-deposit";
 
 /* ==========================================================================
    Menulis piutang ke Supabase.
@@ -50,24 +51,26 @@ async function ambilStruk(saleId: number): Promise<SaleRow> {
 }
 
 /**
- * Tambah deposit customer. Customer yang belum ada di tabel customers ikut
- * dibuat — versi lama juga begitu, karena struk bisa punya nama yang belum
- * pernah masuk daftar.
+ * Tambah deposit customer.
+ *
+ * Customer dicari lewat `pilihCustomer`: nama persis, nama ternormalisasi,
+ * lalu tabel alias. Versi lama hanya mencoba `name=eq.<nama>` persis, jadi
+ * pembayaran atas nama yang ditulis berbeda — "Memet 22" untuk baris yang
+ * tercatat "Jl. Memet S No 22" — tidak ketemu dan Instead membuat baris
+ * customer baru. Itu memecah deposit orang yang sebenarnya sama dan menambah
+ * satu duplikat lagi ke tabel customer.
+ *
+ * Kalau memang tidak ada, baris baru tetap dibuat: memblokirnya akan berarti
+ * kasir tidak bisa mencatat pembayaran untuk orang yang belum pernah order,
+ * dan itu lebih buruk.
  */
 async function tambahDeposit(nama: string, jumlah: number): Promise<void> {
   if (!nama || jumlah <= 0) return;
 
-  const cari = new URL(`${SUPABASE_URL}/rest/v1/customers`);
-  cari.searchParams.set("select", "id,deposit_balance");
-  cari.searchParams.set("name", `eq.${nama}`);
-  cari.searchParams.set("limit", "1");
-  const r = await fetch(cari, { headers: headerRest() });
-  if (!r.ok) throw new Error(`customers: HTTP ${r.status}`);
-  const rows = (await r.json()) as { id: number; deposit_balance: number }[];
-
-  if (rows[0]) {
-    await patch(`customers?id=eq.${rows[0].id}`, {
-      deposit_balance: n(rows[0].deposit_balance) + jumlah,
+  const customer = await cariCustomerUntukDeposit(nama);
+  if (customer) {
+    await patch(`customers?id=eq.${customer.id}`, {
+      deposit_balance: n(customer.deposit_balance) + jumlah,
       updated_at: new Date().toISOString(),
     });
     return;
@@ -77,7 +80,45 @@ async function tambahDeposit(nama: string, jumlah: number): Promise<void> {
     headers: headersTulis(),
     body: JSON.stringify({ name: nama, deposit_balance: jumlah, last_order_at: "" }),
   });
-  if (!buat.ok) throw new Error(`customers: HTTP ${buat.status}`);
+  /* `customers.name` punya constraint UNIQUE. Kalau baris dengan nama itu
+     sebenarnya ada tetapi tidak ketemu di langkah sebelumnya — misalnya
+    kebijakan SELECT tidak berlaku sementara POST berlaku — POST-nya ditolak
+     dengan 409. Itu bukan kegagalan: baris yang sama sudah ada, jadi deposit
+     ditambahkan ke sana, persis seperti cabang di atas. */
+  if (buat.ok) return;
+  if (buat.status === 409) {
+    const ulang = await cariCustomerUntukDeposit(nama);
+    if (ulang) {
+      await patch(`customers?id=eq.${ulang.id}`, {
+        deposit_balance: n(ulang.deposit_balance) + jumlah,
+        updated_at: new Date().toISOString(),
+      });
+      return;
+    }
+  }
+  throw new Error(`customers: HTTP ${buat.status}`);
+}
+
+/** Data customer secukupnya untuk menulis deposit, dengan resolusi alias. */
+async function cariCustomerUntukDeposit(nama: string): Promise<CustomerDeposit | null> {
+  const params = new URLSearchParams({ select: "id,name,deposit_balance" });
+  const r = await fetch(`${SUPABASE_URL}/rest/v1/customers?${params}`, { headers: headerRest() });
+  if (!r.ok) throw new Error(`customers: HTTP ${r.status}`);
+  const customers = (await r.json()) as CustomerDeposit[];
+
+  /* Alias hanya perlu dibaca kalau nama persis tidak ditemukan. Satu
+     request untuk seluruh tabel alias Typis kecil, dan tabelnya jarang
+     berubah. */
+  if (customers.some((c) => String(c.name ?? "").trim() === String(nama).trim())) {
+    return pilihCustomer(nama, customers, []);
+  }
+
+  const paramsAlias = new URLSearchParams({ select: "customer_id,alias" });
+  const ra = await fetch(`${SUPABASE_URL}/rest/v1/customer_aliases?${paramsAlias}`, {
+    headers: headerRest(),
+  });
+  const aliases = ra.ok ? ((await ra.json()) as { customer_id: number; alias: string }[]) : [];
+  return pilihCustomer(nama, customers, aliases);
 }
 
 async function patch(path: string, body: Record<string, unknown>): Promise<void> {
@@ -131,13 +172,57 @@ export async function catatPembayaranPiutang(
     });
     if (!insert.ok) throw new Error(`sale_payments: HTTP ${insert.status}`);
 
-    await patch(`sales?id=eq.${saleId}`, { paid_amount: n(sale.paid_amount) + untukUtang });
-    await tambahDeposit(String(sale.customer_name ?? ""), untukDeposit);
+    /* Id baris yang baru dibuat, dipakai untuk membatalkan diri sendiri kalau
+       langkah berikutnya gagal. Tanpa ini, kasir melihat "Gagal" lalu menekan
+       ulang — dan pembayarannya tercatat dua kali. */
+    const dibuat = ((await insert.json()) as { id?: number }[])?.[0];
+    const idPembayaran = dibuat?.id ?? null;
+
+    try {
+      await patch(`sales?id=eq.${saleId}`, { paid_amount: n(sale.paid_amount) + untukUtang });
+      await tambahDeposit(String(sale.customer_name ?? ""), untukDeposit);
+    } catch (e) {
+      /* Pembayaran sudah tercatat sebelum langkah ini gagal. Kembalikan lagi —
+         pembayaran setengah jadi lebih buruk daripada tidak ada: kasir mengira
+         gagal lalu menekan ulang. Yang dikembalikan persis ke nilai sebelum,
+         jadi percobaan berikutnya membaca keadaan yang bersih. */
+      if (idPembayaran !== null) {
+        await fetch(`${SUPABASE_URL}/rest/v1/sale_payments?id=eq.${idPembayaran}`, {
+          method: "DELETE",
+          headers: headersTulis(),
+        }).catch(() => {});
+        await patch(`sales?id=eq.${saleId}`, { paid_amount: n(sale.paid_amount) }).catch(() => {});
+      }
+      return {
+        ok: false,
+        pesan: `Pembayaran tidak disimpan dan tidak ada yang berubah: ${(e as Error).message}`,
+      };
+    }
 
     return { ok: true, sisa: Math.max(0, sisaSebelum - untukUtang), deposit: untukDeposit };
   } catch (e) {
     return { ok: false, pesan: (e as Error).message };
   }
+}
+
+/**
+ * Total `paid_amount` setelah pembatalan, dihitung dari baris `sale_payments`
+ * yang masih ada di server.
+ *
+ * Jalur pembatalan sekarang menghapus SEMUA pembayaran struk itu, jadi
+ * angkanya 0 — dan itu memang jawaban yang benar: membatalkan pelunasan
+ * berarti pembayarannya dibatalkan, bukan dipotong sebagian.
+ *
+ * Yang penting: angkanya dibaca dari server, bukan `0` yang ditulis
+ * hardcode. Kalau pembatalan suatu saat jadi sebagian, `paid_amount` ikut
+ * dihitung dari sisa pembayaran yang benar-benar ada.
+ */
+async function paymentsYangTersisa(saleId: number, idDihapus: number[]): Promise<number> {
+  const params = new URLSearchParams({ select: "id,amount", sale_id: `eq.${saleId}` });
+  const r = await fetch(`${SUPABASE_URL}/rest/v1/sale_payments?${params}`, { headers: headerRest() });
+  if (!r.ok) throw new Error(`sale_payments: HTTP ${r.status}`);
+  const baris = (await r.json()) as { id: number; amount: number }[];
+  return paidSetelahBatal(baris, new Set(idDihapus), (b) => Number(b.id));
 }
 
 /** Kembalikan transaksi ke "Belum lunas": hapus riwayat + reversing deposit. */
@@ -164,7 +249,12 @@ export async function batalkanLunasPiutang(saleId: number): Promise<HasilPiutang
     });
     if (!hapus.ok) throw new Error(`sale_payments: HTTP ${hapus.status}`);
 
-    await patch(`sales?id=eq.${saleId}`, { paid_amount: 0 });
+    /* `paid_amount` dihitung dari pembayaran yang TIDAK ikut terhapus.
+       Versi lama menulis `paid_amount: 0`, sehingga struk yang sudah dibayar
+       separuh kehilangan catatan pembayarannya begitu pembatalannya ditekan —
+       dan tidak ada lagi yang bisa merekonstruksinya. */
+    const tersisa = await paymentsYangTersisa(saleId, baris.map((b) => Number(b.id)));
+    await patch(`sales?id=eq.${saleId}`, { paid_amount: tersisa });
 
     const total = n(sale.total);
     return { ok: true, sisa: total, deposit: 0 };
@@ -177,22 +267,25 @@ export async function batalkanLunasPiutang(saleId: number): Promise<HasilPiutang
  * Geser saldo deposit. Posisi = bertambah, negatif = berkurang, dan saldo
  * tidak pernah boleh turun di bawah nol.
  *
- * Customer yang tidak ada dilewati diam-diam, bukan digagalkan: pembatalan
- * lunas TIDAK boleh gagal hanya karena nama customer belum masuk tabel
- * customers.
+ * Customer dicari dengan `pilihCustomer`, sama seperti `tambahDeposit`: nama
+ * persis, nama ternormalisasi, lalu alias. Versi lama hanya mencoba
+ * `name=eq.<nama>` — jadi kalau nama customer di struk beda spasi atau beda
+ * ejaan dari yang tercatat, depositnya tidak dikoreksi. Efeknya lebih ringan
+ * daripada di `tambahDeposit` (tidak ada customer baru, jadi tidak ada duplikat
+ * baru), tapi deposit yang seharusnya dikembalikan tetap tertinggal di kasir.
+ *
+ * Customer yang benar-benar tidak ada tetap dilewati diam-diam: pembatalan lunas
+ * tidak boleh gagal hanya karena orangnya belum masuk tabel customers. Yang
+ * sudah berubah setelah pembatalan tidak bisa diulang — riwayatnya sudah
+ * dihapus — jadi lebih baik depositnya tidak dikembalikan daripada
+ * pembatalannya seluruhnya ditolak.
  */
 async function geserDeposit(nama: string, posisi: number): Promise<void> {
   if (!nama || posisi === 0) return;
-  const cari = new URL(`${SUPABASE_URL}/rest/v1/customers`);
-  cari.searchParams.set("select", "id,deposit_balance");
-  cari.searchParams.set("name", `eq.${nama}`);
-  cari.searchParams.set("limit", "1");
-  const r = await fetch(cari, { headers: headerRest() });
-  if (!r.ok) throw new Error(`customers: HTTP ${r.status}`);
-  const rows = (await r.json()) as { id: number; deposit_balance: number }[];
-  if (!rows[0]) return;
-  await patch(`customers?id=eq.${rows[0].id}`, {
-    deposit_balance: Math.max(0, n(rows[0].deposit_balance) + posisi),
+  const customer = await cariCustomerUntukDeposit(nama);
+  if (!customer) return;
+  await patch(`customers?id=eq.${customer.id}`, {
+    deposit_balance: Math.max(0, n(customer.deposit_balance) + posisi),
     updated_at: new Date().toISOString(),
   });
 }
