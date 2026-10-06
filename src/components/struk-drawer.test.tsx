@@ -3,35 +3,50 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import "@testing-library/jest-dom/vitest";
 import { cleanup, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { forwardRef, useImperativeHandle } from "react";
+
 
 import type { Sale } from "@/lib/sale";
+import type { HasilUbah, UbahStrukInput } from "@/lib/supabase-tulis";
 
-/* "Cetak Ulang" in the receipt drawer.
+/* "Cetak Ulang" and "Ubah Data" in the receipt drawer.
  *
- * The button used to read `onClick={() => setMode("cetak")}` while the element
- * containing it was already rendered under `mode === "cetak"`. That is a no-op
- * — the state is set to the value it already has — so the print dialog never
- * opened and the feature was dead. Nothing caught it: a click that changes
- * nothing still looks like a passing click.
+ * The print button used to read `onClick={() => setMode("cetak")}` while the
+ * element containing it was already rendered under `mode === "cetak"`. That is
+ * a no-op — the state is set to the value it already has — so the print dialog
+ * never opened. "Simpan" was worse: it mutated local state and flashed
+ * "✓ Tersimpan" without writing anything, so every keystroke was lost when the
+ * drawer closed. Neither was caught, because a click that changes nothing looks
+ * exactly like a passing click.
  *
  * The receipt component is stubbed rather than rendered. Its real `cetak()`
  * builds a `srcdoc` iframe and calls `contentWindow.print()`, which jsdom does
- * not execute, so a real render could not assert anything. What is under test
- * here is the drawer's wiring — that the button reaches the receipt's print
- * path — and the stub is the seam for observing that. The receipt's own
- * printing is covered by `struk.test.ts` and the E2E suite. */
+ * not execute, so a real render could not assert anything. The stub is the seam
+ * for observing both the print call and the data the preview is built from.
+ * The receipt's own printing is covered by `struk.test.ts` and the E2E suite. */
 
-const cetakMock = vi.fn();
+/* `vi.mock` is hoisted above imports, so the factory cannot close over
+   imported values either — hence the async factory with a dynamic import of
+   react inside it. `cetakMock` is the one thing the factory needs from this
+   file's scope, and it comes from `vi.hoisted`. */
+const { cetakMock } = vi.hoisted(() => ({ cetakMock: vi.fn() }));
 
-vi.mock("@/components/struk", () => {
-  const Stub = forwardRef<{ cetak: () => void; html: () => string }, { data: unknown }>(
-    function Stub(_props, ref) {
-      useImperativeHandle(ref, () => ({ cetak: cetakMock, html: () => "" }));
-      return <div title="Pratinjau struk" />;
-    },
-  );
-  return { Struk: Stub };
+vi.mock("@/components/struk", async () => {
+  const React = await import("react");
+  /* `data` is serialised into the DOM so the specs can assert what the print
+     preview was built from — that is how the dropped per-item `note` and the
+     hardcoded empty `sendNote` were caught. */
+  const Struk = React.forwardRef(function Struk(
+    { data }: { data: unknown },
+    ref: React.ForwardedRef<{ cetak: () => void; html: () => string }>,
+  ) {
+    React.useImperativeHandle(ref, () => ({ cetak: cetakMock, html: () => "" }));
+    return React.createElement("div", {
+      title: "Pratinjau struk",
+      "data-testid": "struk-data",
+      children: JSON.stringify(data),
+    });
+  });
+  return { Struk };
 });
 
 const { StrukDrawer } = await import("@/components/struk-drawer");
@@ -43,6 +58,7 @@ const SALE: Sale = {
   completedOn: "2026-10-05",
   completedIso: "2026-10-05T12:00:00.000Z",
   completedAt: "05/10/2026 19.01",
+  completedAtShort: "5 Okt 19:01",
   total: 1000,
   payment: "Tunai",
   itemCount: 1,
@@ -129,5 +145,220 @@ describe("Cetak Ulang di drawer struk", () => {
 
     render(<fresh.StrukDrawer sale={SALE} onClose={() => {}} />);
     expect(screen.getByText(/80mm/)).toBeInTheDocument();
+  });
+});
+
+/* -------------------------------------------------------------------------
+   Ubah Data
+
+   The drawer's "Simpan" used to only touch local state and flash
+   "✓ Tersimpan" — nothing was written, and every keystroke was lost when the
+   drawer closed. That is invisible to a click-based assertion, because the
+   click "worked".
+
+   The payload given to `onSimpan` is what these specs check: it is the only
+   thing standing between the form and the database.
+   -------------------------------------------------------------------------- */
+
+const simpanMock = vi.fn<(p: UbahStrukInput) => Promise<HasilUbah>>();
+
+const { StrukDrawer: Drawer } = await import("@/components/struk-drawer");
+
+const SALE_BERNOTE: Sale = {
+  ...SALE,
+  /* Consistent with its lines: 35.000 + 10.000. A fixture whose stored total
+     disagrees with its items makes every "total berubah" assertion fire on
+     open, which hides the real one. */
+  total: 45_000,
+  sendNote: "titip antar siang",
+  lines: [
+    { id: 101, name: "Gule Daging", variant: "Normal", qty: 1, price: 35_000, note: "saos bnyakin" },
+    { id: 102, name: "Es Kacang Ijo", variant: "Normal", qty: 1, price: 10_000 },
+  ],
+};
+
+async function bukaEdit() {
+  render(<Drawer sale={SALE_BERNOTE} onClose={() => {}} onSimpan={simpanMock} />);
+  await masukModeEdit();
+}
+
+/* The footer swaps modes through `AnimatePresence mode="wait"`, so the new
+   panel only mounts after the old one finishes animating out. That takes a
+   frame, and `await userEvent.click` does not wait for one — without the
+   `waitFor` every spec in the Ubah Data block fails with "unable to find
+   label" even though the mode did change. */
+async function masukModeEdit() {
+  await userEvent.click(screen.getByRole("button", { name: /Ubah Data/i }));
+  await waitFor(() => expect(screen.getByLabelText(/Catatan kirim/i)).toBeInTheDocument());
+}
+
+async function masukModeCetak() {
+  await userEvent.click(screen.getByRole("button", { name: /Cetak Ulang/i }));
+  await waitFor(() => expect(screen.getByTitle("Pratinjau struk")).toBeInTheDocument());
+}
+
+/* Back to the detail view. "Rincian Item" is a heading in BOTH modes, so it
+   is useless as a marker — waiting on it passes while still in edit mode, and
+   the next lookup for "Cetak Ulang" then fails. The per-item note field only
+   exists in edit mode, so its absence is the honest signal. */
+async function kembaliKeRincian() {
+  await waitFor(() => expect(screen.queryByLabelText("Catatan item Gule Daging")).toBeNull());
+}
+
+describe("Ubah Data di drawer struk", () => {
+  beforeEach(() => {
+    simpanMock.mockReset();
+    simpanMock.mockResolvedValue({ ok: true, subtotal: 45_000, total: 45_000, dibuang: 0 });
+  });
+
+  it("memakai kolom Catatan Kirim, bukan Alamat Kirim", async () => {
+    render(<Drawer sale={SALE_BERNOTE} onClose={() => {}} onSimpan={simpanMock} />);
+    await masukModeEdit();
+
+    expect(screen.getByLabelText(/Catatan kirim/i)).toBeInTheDocument();
+    /* Alamat customer tidak pernah masuk ke struk, jadi field yang dulu ada
+       di sini hanya menghasilkan data yang tidak terlihat di mana pun. */
+    expect(screen.queryByLabelText(/Alamat Kirim/i)).toBeNull();
+  });
+
+  it("Catatan Kirim terisi dari send_note yang tersimpan", async () => {
+    await bukaEdit();
+    expect(screen.getByLabelText(/Catatan kirim/i)).toHaveValue("titip antar siang");
+  });
+
+  it("ada input catatan per baris item", async () => {
+    await bukaEdit();
+    expect(screen.getByLabelText("Catatan item Gule Daging")).toBeInTheDocument();
+    expect(screen.getByLabelText("Catatan item Es Kacang Ijo")).toBeInTheDocument();
+  });
+
+  it("catatan item yang sudah ada terisi, tidak dikosongkan", async () => {
+    /* Ini yang hilang_total dulu: `mapItem` mengambil `note`, tapi form
+       membangun baris tanpa `note`, jadi catatan "saos bnyakin" hilang begitu
+       drawer dibuka. */
+    await bukaEdit();
+    expect(screen.getByLabelText("Catatan item Gule Daging")).toHaveValue("saos bnyakin");
+    expect(screen.getByLabelText("Catatan item Es Kacang Ijo")).toHaveValue("");
+  });
+
+  it("Simpan mengirim catatan item ke server", async () => {
+    await bukaEdit();
+
+    await userEvent.clear(screen.getByLabelText("Catatan item Gule Daging"));
+    await userEvent.type(screen.getByLabelText("Catatan item Gule Daging"), "tanpa lombok");
+    await userEvent.click(screen.getByRole("button", { name: /^Simpan$/i }));
+
+    await waitFor(() => expect(simpanMock).toHaveBeenCalled());
+    const baris = simpanMock.mock.calls[0]![0].lines;
+    expect(baris.find((l) => l.id === 101)?.note).toBe("tanpa lombok");
+  });
+
+  it("Simpan mengirim catatan kirim ke server", async () => {
+    await bukaEdit();
+    await userEvent.clear(screen.getByLabelText(/Catatan kirim/i));
+    await userEvent.type(screen.getByLabelText(/Catatan kirim/i), "doorbell mati");
+    await userEvent.click(screen.getByRole("button", { name: /^Simpan$/i }));
+
+    await waitFor(() => expect(simpanMock).toHaveBeenCalled());
+    expect(simpanMock.mock.calls[0]![0].sendNote).toBe("doorbell mati");
+  });
+
+  it("Simpan mengirim saleId dan id tiap baris", async () => {
+    /* Tanpa id, PATCH akan menulis ke `id=eq.0`. */
+    await bukaEdit();
+    await userEvent.click(screen.getByRole("button", { name: /^Simpan$/i }));
+    await waitFor(() => expect(simpanMock).toHaveBeenCalled());
+
+    const p = simpanMock.mock.calls[0]![0];
+    expect(p.saleId).toBe(SALE_BERNOTE.id);
+    expect(p.lines.map((l) => l.id).sort()).toEqual([101, 102]);
+  });
+
+  it("tidak keluar dari mode edit kalau server menolak", async () => {
+    /* Keluar dari mode edit padahal tidak ada yang tersimpan adalah cara
+       paling cepat membuat kasir mengira perubahannya sudah masuk. */
+    simpanMock.mockResolvedValue({ ok: false, pesan: "Struk tidak ditemukan di server." });
+
+    await bukaEdit();
+    await userEvent.click(screen.getByRole("button", { name: /^Simpan$/i }));
+
+    const alert = await screen.findByRole("alert");
+    expect(alert).toHaveTextContent(/tidak ditemukan di server/i);
+    expect(screen.getByLabelText(/Catatan kirim/i)).toBeInTheDocument();
+  });
+
+  it("memberi tahu kalau total naik dan struk jadi belum lunas", async () => {
+    simpanMock.mockResolvedValue({ ok: true, subtotal: 60_000, total: 60_000, statusBerubah: true });
+
+    await bukaEdit();
+    await userEvent.click(screen.getByRole("button", { name: /^Simpan$/i }));
+
+    const alert = await screen.findByRole("alert");
+    expect(alert).toHaveTextContent(/BELUM LUNAS/i);
+  });
+
+  it("memberi tahu baris mana yang akan hilang karena qty 0", async () => {
+    await bukaEdit();
+    const qty = screen.getByLabelText("Qty Es Kacang Ijo");
+    await userEvent.clear(qty);
+    await userEvent.type(qty, "0");
+
+    expect(screen.getByText(/Es Kacang Ijo qty 0/)).toBeInTheDocument();
+    expect(screen.getByText(/catatan yang ikut hilang/i)).toBeInTheDocument();
+  });
+
+  it("memperingatkan total akan berubah sebelum disimpan", async () => {
+    await bukaEdit();
+    expect(screen.queryByText(/Total berubah/)).toBeNull();
+
+    const harga = screen.getByLabelText("Harga per porsi Gule Daging");
+    await userEvent.clear(harga);
+    await userEvent.type(harga, "99000");
+
+    expect(screen.getByText(/Total berubah/)).toBeInTheDocument();
+  });
+
+  it("tombol Simpan disembunyikan kalau tidak ada penangan", async () => {
+    /* Tanpa `onSimpan` tidak ada yang menulis. Menampilkan tombol "Simpan" di
+       situation itu berarti berbohong dua kali: ia menampilkan "✓ Tersimpan" sambil
+       menyimpan nol byte. */
+    render(<Drawer sale={SALE_BERNOTE} onClose={() => {}} />);
+    await masukModeEdit();
+    expect(screen.queryByRole("button", { name: /^Simpan$/i })).toBeNull();
+  });
+
+  it("pratinjau Cetak Ulang memakai catatan dari form", async () => {
+    /* Cetak ulang membangun struk dari `form`, yang tadinya tidak pernah
+       menyertakan `note` dan sendNote-nya string kosong. Hasilnya: struk
+       yang dicetak berbeda dari struk yang sudah keluar dari printer. */
+    render(<Drawer sale={SALE_BERNOTE} onClose={() => {}} onSimpan={simpanMock} />);
+    await masukModeEdit();
+    await userEvent.clear(screen.getByLabelText(/Catatan kirim/i));
+    await userEvent.type(screen.getByLabelText(/Catatan kirim/i), "titip POS");
+
+    await userEvent.click(screen.getByRole("button", { name: /^Kembali$/i }));
+    await kembaliKeRincian();
+    await masukModeCetak();
+
+    const pratinjau = await screen.findByTestId("struk-data");
+    const data = JSON.parse(pratinjau.textContent ?? "{}");
+    expect(data.sendNote).toBe("titip POS");
+    expect(data.items[0].note).toBe("saos bnyakin");
+  });
+
+  it("pratinjau totalnya mengikuti form, bukan total lama", async () => {
+    render(<Drawer sale={SALE_BERNOTE} onClose={() => {}} onSimpan={simpanMock} />);
+    await masukModeEdit();
+    const harga = screen.getByLabelText("Harga per porsi Gule Daging");
+    await userEvent.clear(harga);
+    await userEvent.type(harga, "99000");
+
+    await userEvent.click(screen.getByRole("button", { name: /^Kembali$/i }));
+    await kembaliKeRincian();
+    await masukModeCetak();
+
+    const data = JSON.parse((await screen.findByTestId("struk-data")).textContent ?? "{}");
+    /* 99.000 + 10.000. The old total must not survive an edit. */
+    expect(data.total).toBe(109_000);
   });
 });

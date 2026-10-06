@@ -6,12 +6,19 @@
    ========================================================================== */
 
 export type SaleLine = {
+  /** id baris di tabel `sale_items`. PATCH butuh primary key, dan
+      mencocokkan baris lewat nama + varian tidak aman — satu menu bisa muncul
+      dua kali dalam struk yang sama dengan varian berbeda, dan begitu
+      namanya diedit keduanya bisa sama persis.
+      Opsional supaya fixture dan data yang belum bersumber dari server tetap
+      bisa dipakai; `ubahStruk` menolak baris tanpa id, bukan menebak. */
+  id?: number;
   name: string;
   variant: string;
   qty: number;
   price: number;
   /** Catatan dapur untuk baris ini — hanya baris ini yang masuk bagian
-      CATATAN ITEM di KOT. */
+      CATATAN ITEM di KOT, dan dicetak sebagai catatan item di struk. */
   note?: string;
 };
 
@@ -29,12 +36,21 @@ export type Sale = {
   /** ISO mentah dari server (UTC). Disimpan supaya pengelompokan per jam
       tidak perlu mengurai completedAt yang sudah diformat. */
   completedIso: string;
+  /** Penuh: "6 Oktober 2026, 09:49". Dipakai tabel dan laporan. */
   completedAt: string;
+  /** Ringkas: "6 Okt 09:49". Untuk kartu di layar sempit, tempat label
+      penuh terpotong dan tanggalnya justru hilang. */
+  completedAtShort: string;
   total: number;
   payment: string;
   itemCount: number;
   status: StatusStruk;
   address?: string;
+  /** Kolom `sales.send_note` — dicetak struk sebagai "CATATAN KIRIM".
+      This is what the receipt reads, not `address`: a customer address never
+      reaches the paper, so editing it here only produces data that appears
+      nowhere. */
+  sendNote?: string;
   /** Tidak ada kolomnya di database — selalu undefined sampai sumbernya
       ditambahkan. Jangan diisi dari tebakan. */
   courier?: string;

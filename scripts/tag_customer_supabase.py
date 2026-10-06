@@ -23,7 +23,12 @@ import urllib.request
 from collections import Counter
 
 sys.path.insert(0, ".")
-from update_customers_csv import infer_customer_address_tag, normalize_customer_tag, supabase_key
+from update_customers_csv import (
+    fetch_table,
+    infer_customer_address_tag,
+    normalize_customer_tag,
+    supabase_key,
+)
 
 SUPABASE_URL = os.environ.get("SUPABASE_URL", "https://ddfalsclevkqhiyojngx.supabase.co")
 AKUN_RAZIP = "backups/supabase-20261002-1344"
@@ -60,8 +65,24 @@ def main() -> None:
     ap.add_argument("--tulis", action="store_true", help="tulis ke Supabase")
     args = ap.parse_args()
 
-    customers = json.load(open(f"{AKUN_RAZIP}/customers.json", encoding="utf-8"))
-    alias = json.load(open(f"{AKUN_RAZIP}/customer_aliases.json", encoding="utf-8"))
+    # Sumber data: Supabase langsung. Backup October dipakai sebelumnya
+    # supaya dry-run bisa jalan tanpa kredensial, tapi foldernya sudah tidak
+    # ada di repo ini (gitignored bersama data pelanggan lainnya) — jadi
+    # scriptnya tidak bisa dijalankan sama sekali.
+    #
+    # Tarik dari server juga lebih benar untuk keperluan ini: yang perlu
+    # diisi adalah tag yang kosong SEKARANG, bukan yang kosong pada saat
+    # backup diambil. Snapshot bisa saja sudah usang dan menuliskan tag
+    # untuk customer yang sejak itu sudah diisi atau dihapus.
+    if os.path.isdir(AKUN_RAZIP):
+        customers = json.load(open(f"{AKUN_RAZIP}/customers.json", encoding="utf-8"))
+        alias = json.load(open(f"{AKUN_RAZIP}/customer_aliases.json", encoding="utf-8"))
+        print(f"Sumber: backup {AKUN_RAZIP}")
+    else:
+        print("Backup tidak ada — menarik langsung dari Supabase.")
+        customers = fetch_table("customers")
+        alias = fetch_table("customer_aliases")
+        print(f"Sumber: Supabase ({len(customers)} customer, {len(alias)} alias)")
 
     # Alias dikelompokkan per customer_id supaya `infer_customer_address_tag`
     # bisa melihat semua nama yang dikenal untuk customer itu. Tanpa ini

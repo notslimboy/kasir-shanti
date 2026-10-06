@@ -47,6 +47,12 @@ export type CartItem = {
   qty: number;
   /** null = tanpa batas stok. */
   stock: number | null;
+  /** Permintaan pelanggan untuk baris ini saja — "tanpa sambel",
+      "tanpa lontong". Satu catatan berlaku untuk seluruh qty baris ini.
+      undefined = belum ada catatan; jangan diisi string kosong, karena
+      kolom `note` di database dan cetakan struk membacanya sebagai
+      "tidak ada". Lihat lib/catatan-item.ts. */
+  note?: string;
 };
 
 export type HeldOrder = {

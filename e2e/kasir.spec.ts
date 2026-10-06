@@ -178,3 +178,48 @@ test("nominal uang diformat dalam Rupiah", async ({ page }) => {
   // Kasir Indonesia salah baca "25000" sebagai dua ratus lima ribu.
   await expect(item.first()).toContainText("Rp");
 });
+
+test("catatan per baris ditulis, tetap tampil, dan ikut ke daftar hold", async ({ page }) => {
+  await katalogSiap(page);
+
+  await page.getByPlaceholder("Cari menu atau SKU…").fill("a");
+  await page.waitForTimeout(500);
+  const item = page.locator("[data-cart-item]").first();
+
+  await page.locator(`[data-variant-add="${VARIAN_PILIH}"]`).first().click();
+  await expect(item).toBeVisible();
+
+  /* Dua langkah: tombol "+ Catatan" membuka input, isinya disimpan tanpa
+     tombol simpan. Kalau salah satu hilang, catatan tidak pernah sampai
+     ke struk — dan kasir baru sadar setelah pelanggan menerima orderan
+     yang tidak sesuai. */
+  await item.getByRole("button", { name: "+ Catatan" }).click();
+  const input = item.getByPlaceholder("mis. tanpa sambel, tanpa lontong");
+  await expect(input).toBeVisible();
+
+  await input.fill("  tanpa sambel  ");
+  await input.press("Enter");
+
+  /* toHaveText membandingkan persis, jadi ini sekaligus memeriksa spasi
+     tepi sudah dibuang: yang tampil adalah hasil normalisasi, bukan
+     yang diketik kasir mentah-mentah. */
+  const tampil = item.getByRole("button", { name: /^Ubah catatan/ });
+  await expect(tampil.locator("span").first()).toHaveText("tanpa sambel");
+
+  /* Catatan harus ikut tersimpan bersama keranjang, bukan hanya ada di
+     state tampilan. Hold ditulis ke IndexedDB lalu dibaca ulang saat
+     aplikasi dibuka — kalau note tidak ikut ke sana, catatan hilang
+     tepat di saat kasir paling butuh: antar order. */
+  await page.getByRole("button", { name: "Simpan Hold" }).click();
+  await page.getByRole("button", { name: "Buka Hold" }).click();
+
+  /* Dicocokkan lewat accessible name tombol hold, bukan getByText: saat
+     ini baris keranjang masih animasi keluar, jadi getByText(/tanpa
+     sambel/) menemukan dua elemen dan gagal dengan strict mode. Nama
+     tombol hold hanya memuat ringkasan isi, jadi ini tidak pernah
+     menyentuh baris keranjang. */
+  await expect(
+    page.getByRole("button", { name: /\(tanpa sambel\) ×1/ }),
+    "catatan tidak ikut ke daftar hold — hilang tepat saat kasir antar order",
+  ).toBeVisible();
+});

@@ -46,6 +46,15 @@ const BULAN = [
   "Juli", "Agustus", "September", "Oktober", "November", "Desember",
 ];
 
+/* Bentuk tiga huruf, untuk tempat yang lebarnya sempit. "6 Okt 09:49"
+   muat di kartu struk pada layar 320px; "6 Oktober 2026, 09:49" tidak
+   muat dan justru terpotong jadi "6 Okt...", sehingga tanggalnya
+   hilang justru di tempat yang paling sempit. */
+const BULAN_SINGKAT = [
+  "Jan", "Feb", "Mar", "Apr", "Mei", "Jun",
+  "Jul", "Agu", "Sep", "Okt", "Nov", "Des",
+];
+
 function keWaktuLokal(iso: string): Date | null {
   const t = new Date(String(iso));
   return Number.isNaN(t.getTime()) ? null : t;
@@ -68,6 +77,18 @@ export function labelWaktuLokal(iso: string): string {
   const jam = String(l.getHours()).padStart(2, "0");
   const menit = String(l.getMinutes()).padStart(2, "0");
   return `${l.getDate()} ${BULAN[l.getMonth()]} ${l.getFullYear()}, ${jam}:${menit}`;
+}
+
+/** "6 Okt 09:49" — untuk kartu di layar sempit.
+    Tahun sengaja dibuang: layar ini sudah menunjukkan satu rentang
+    tanggal, jadi tahun tidak menambah informasi, sedangkan nama bulan
+    penuh memakan lebar yang justru dibutuhkan jam. */
+export function labelWaktuRingkas(iso: string): string {
+  const l = keWaktuLokal(iso);
+  if (!l) return String(iso);
+  const jam = String(l.getHours()).padStart(2, "0");
+  const menit = String(l.getMinutes()).padStart(2, "0");
+  return `${l.getDate()} ${BULAN_SINGKAT[l.getMonth()]} ${jam}:${menit}`;
 }
 
 /** "29 September 2026" */
@@ -128,6 +149,11 @@ export function namaItemDari(row: Pick<SaleItemRow, "menu_name" | "name" | "vari
 
 export function mapItem(row: SaleItemRow) {
   return {
+    /* Dibawa naik supaya form Ubah Data bisa menulis balik per baris.
+       Dicocokkan lewat nama + varian tidak aman: satu menu bisa muncul dua
+       kali dengan varian berbeda, dan begitu nama diedit keduanya bisa sama
+       persis — lalu PATCH-nya menimpa baris yang salah. */
+    id: row.id,
     name: String(row.menu_name || row.name || "Item").trim(),
     variant: String(row.variant_name ?? "").trim(),
     qty: n(row.quantity),
@@ -149,11 +175,16 @@ export function mapStruk(row: SaleRow, items: SaleItemRow[] = []): Sale {
     completedOn: tanggalISODari(row),
     completedIso: row.completed_at,
     completedAt: labelWaktuLokal(row.completed_at),
+    completedAtShort: labelWaktuRingkas(row.completed_at),
     total: n(row.total),
     payment: String(row.payment || "Lainnya"),
     itemCount: lines.reduce((a, l) => a + l.qty, 0),
     status: statusDari(row),
     address: String(row.customer_address ?? "").trim() || undefined,
+    /* `send_note` diambil dari server (live.ts:105) tapi sebelumnya dibuang
+       di sini, lalu struk-drawer mengisinya dengan string kosong. Akibatnya
+       "CATATAN KIRIM" yang ada di struk asli hilang begitu di-cetak ulang. */
+    sendNote: String(row.send_note ?? "").trim() || undefined,
     courier: undefined, // tidak ada kolomnya di tabel sales
     ongkir: ongkirDari(row),
     diskon: n(row.discount),

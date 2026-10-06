@@ -198,6 +198,31 @@ export const VARIAN_PILIH = "Normal";
  *  kasir.tsx treat the line as cashier-priced. */
 export const VARIAN_CUSTOM = "Custom";
 
+/** Satu struk yang bisa dipakai spec yang perlu melihat daftar struk. */
+export const SALE_FIXTURE = {
+  id: 1,
+  receipt_no: "SH-20261006-0043",
+  completed_at: "2026-10-06T02:49:00.000Z",
+  store_name: "Shanti Catering",
+  payment: "Tunai",
+  subtotal: 35_000,
+  discount: 0,
+  tax: 0,
+  total: 35_000,
+  customer_name: "Customer Fixture",
+  customer_address: "",
+  order_note: "",
+  due_text: "",
+  chat_date: "",
+  deleted_at: null,
+  stock_restored_on_delete: 0,
+  paid_amount: 35_000,
+  created_at: "2026-10-06T02:49:00.000Z",
+  queue_no: 1,
+  queue_date: "2026-10-06",
+  send_note: "",
+};
+
 const TABEL: Record<string, unknown[]> = {
   customers: CUSTOMER,
   customer_aliases: ALIAS,
@@ -208,6 +233,130 @@ const TABEL: Record<string, unknown[]> = {
   sale_payments: [],
 };
 
+/* Baris item dari struk fixture. SaleLine tidak bisa dibuat tanpa `id`
+   (primary key baris di `sale_items`), jadi di sini ada. */
+const SALE_BARIS = {
+  id: 1,
+  sale_id: 1,
+  sku: "",
+  name: "Nasi Goreng Rumahan",
+  price: 35_000,
+  quantity: 1,
+  line_total: 35_000,
+  note: "",
+  product_client_id: "p-nasi-goreng",
+  variant_client_id: "",
+  menu_name: "Nasi Goreng Rumahan",
+  variant_name: "Normal",
+  unit_name: "",
+  unit_quantity: null,
+  pricing_type: "fixed",
+  receipt_label: "",
+};
+
+/* Tiga customer dari data nyata yang kolom Tag-nya dulu tampil kosong.
+
+   Bentuknya berbeda-beda, dan itu justru inti masalahnya:
+
+   1. "Anis BTH" — kolom tag kosong, tag tersimpan di alias
+      `tagalamat:ITS`, dan namanya sendiri tidak memuat kata area
+      sama sekali.
+   2. "Managemen Bisnis Ayu" — namanya salah ketik di database (kurang
+      'e'), sedangkan struk memakai ejaan yang benar, jadi cocok persis
+      gagal. Kata "ITS"-nya ada di alias `Gedung FKK ITS Lt 2`.
+   3. "Inayati" — nama dan alias-nya tidak memuat kata area apa pun.
+      Satu-satunya sumber tag adalah alias `tagalamat:ITS`.
+
+   Ketiganya harus menampilkan area. Kalau ada yang kembali kosong, yang
+   rusak bukan kolom Tag tapi pemetaan nama-ke-area di lib/kurir.ts. */
+export const CUSTOMER_TAG_DI_ALIAS = [
+  {
+    id: 126,
+    name: "Anis BTH",
+    default_shipping: 5000,
+    last_order_at: null,
+    created_at: "2026-01-09T00:00:00.000Z",
+    updated_at: "2026-01-09T00:00:00.000Z",
+    deposit_balance: 0,
+    tag: null,
+  },
+  {
+    id: 201,
+    name: "Managemen Bisnis Ayu",
+    default_shipping: 5000,
+    last_order_at: null,
+    created_at: "2026-01-09T00:00:00.000Z",
+    updated_at: "2026-01-09T00:00:00.000Z",
+    deposit_balance: 0,
+    tag: null,
+  },
+  {
+    id: 1969,
+    name: "Inayati",
+    default_shipping: 5000,
+    last_order_at: null,
+    created_at: "2026-01-09T00:00:00.000Z",
+    updated_at: "2026-01-09T00:00:00.000Z",
+    deposit_balance: 0,
+    tag: null,
+  },
+];
+
+export const ALIAS_TAG_DI_ALIAS = [
+  { customer_id: 126, alias: "tagalamat:ITS" },
+  { customer_id: 126, alias: "ANIS BRIN" },
+  { customer_id: 126, alias: "Anish BRIN" },
+  { customer_id: 201, alias: "Gedung FKK ITS Lt 2" },
+  { customer_id: 201, alias: "Manajemen Bisnis Ayu" },
+  { customer_id: 1969, alias: "tagalamat:ITS" },
+  { customer_id: 1969, alias: "Inayati Kasubbag. Regita" },
+];
+
+/** Struk untuk customer yang tag-nya hanya ada di alias.
+
+    Nama customer di `sales` sengaja memakai ejaan yang berbeda dari
+    `customers` — itu bentuk yang benar-benar terjadi, karena ejaan di
+    database keliru sementara struk memakai yang benar. */
+export const SALE_TAG_DI_ALIAS = [
+  {
+    ...SALE_FIXTURE,
+    id: 3,
+    receipt_no: "SH-20261006-0019",
+    customer_name: "Anis BTH",
+  },
+  {
+    ...SALE_FIXTURE,
+    id: 4,
+    receipt_no: "SH-20261006-0002",
+    /* Ejaan di customers adalah "Managemen" (kurang 'e'). */
+    customer_name: "Manajemen Bisnis Ayu",
+  },
+  {
+    ...SALE_FIXTURE,
+    id: 5,
+    receipt_no: "SH-20261006-0003",
+    customer_name: "Inayati",
+  },
+];
+
+/** Struk dengan nama yang tidak ada di `customers`, jadi tag-areanya
+    kosong. Untuk menguji tanda "tanpa tag", bukan hanya kasus yang punya
+    tag. */
+export const SALE_TANPA_TAG = {
+  ...SALE_FIXTURE,
+  id: 2,
+  receipt_no: "SH-20261006-0042",
+  customer_name: "Tanpa Tag Customer",
+};
+
+/** Nama yang jauh lebih panjang dari lebar kolom mana pun, supaya
+    pemotongan benar-benar terjadi dan tooltip punya alasan untuk muncul. */
+export const SALE_NAMA_PANJANG =
+  "Puri Asri Residential Apartment 3 Blok C Nomor 32 Nenet";
+
+/** Tabel yang diisi spec ini, di atas bawaan fixture. */
+export type TabelFixture = Record<string, unknown[]>;
+
 /**
  * Serve every PostgREST request from the fixture above.
  *
@@ -215,12 +364,23 @@ const TABEL: Record<string, unknown[]> = {
  * asserts on persisted state — they all assert on what the screen shows
  * straight after the call — so an echo is enough, and nothing here can reach
  * the live database.
+ *
+ * `tambahan` menambah baris untuk spec yang butuh isi tabel yang kosong.
+ * Default-nya kosong supaya spec lain tetap menguji keadaan kosong, yang
+ * merupakan majority of the suite's assertions — menambah struk ke
+ * bawaan akan mengubah semua angka dashboard yang mereka andalkan.
  */
-export async function pakaiSupabasePalsu(page: Page): Promise<void> {
+export async function pakaiSupabasePalsu(
+  page: Page,
+  tambahan: TabelFixture = {},
+): Promise<void> {
+  const isi: Record<string, unknown[]> = { ...TABEL, ...tambahan };
+  if (tambahan.sales) isi.sale_items = tambahan.sale_items ?? [SALE_BARIS];
+
   await page.route("**/rest/v1/**", async (route) => {
     const path = new URL(route.request().url()).pathname;
     const tabel = path.split("/rest/v1/")[1]?.split("/")[0] ?? "";
-    const baris = TABEL[tabel] ?? [];
+    const baris = isi[tabel] ?? [];
     await route.fulfill({
       status: 200,
       contentType: "application/json; charset=utf-8",

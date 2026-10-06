@@ -15,8 +15,16 @@ import { Card, CardTitle, IconButton, Pill } from "@/components/ui/card";
 import { Toast, useToast } from "@/components/ui/toast";
 import { Modal } from "@/components/ui/modal";
 import { SortableTh, TableSearch, urutkan, useUrutan } from "@/components/ui/sortable-table";
-import { hapusStruk, hapusStrukPermanen, restoreStruk } from "@/lib/supabase-tulis";
+import {
+  hapusStruk,
+  hapusStrukPermanen,
+  restoreStruk,
+  ubahStruk,
+  type HasilUbah,
+  type UbahStrukInput,
+} from "@/lib/supabase-tulis";
 import { IkonAksi, IkonHapusPermanen, IkonRestore } from "@/components/ui/ikon-aksi";
+import { TeksPotong } from "@/components/ui/tooltip";
 import { KotCard } from "@/components/kot-card";
 import { buildKitchenOrderTicket } from "@/lib/kot";
 import { StrukDrawer } from "@/components/struk-drawer";
@@ -54,9 +62,26 @@ function ringkasTick(v: number): string {
 
 const startOfDay = (x: Date) => new Date(x.getFullYear(), x.getMonth(), x.getDate());
 
+/* Tanda untuk struk yang namanya tidak punya jejak area.
+
+   Tanda hubung, bukan teks panjang dan bukan sel kosong: kolom Tag dibaca
+   sekilas sambil mata sudah bergerak ke kolom Total, jadi yang dibutuhkan
+   hanya "ada isinya atau tidak". Sel kosong akan terbaca sebagai tabel
+   yang gagal dimuat, dan "Tanpa tag" versi panjang memakan lebar kolom
+   yang justru dibutuhkan tag yang benar. */
+const TANPA_TAG = "—";
+
 /** "2026-09-30" dari Date lokal — dipakai untuk query rentang ke server. */
 const tgl = (d: Date) =>
   `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+
+/* Baris tabel + tag areanya.
+
+   Tag tidak ada di `sales` — tabel itu tidak punya kolomnya. Tag dibaca
+   dari `customers` lewat nama, jadi bentuk barisnya perlu membawanya
+   sendiri; tanpa itu, mengurutkan kolom Tag akan selalu melihat kosong
+   dan tidak pernah bisa bergerak. */
+type BarisStruk = Sale & { tag: string };
 
 /* Nilai yang dipakai `urutkan` untuk tiap kolom Detail Struk.
 
@@ -65,12 +90,18 @@ const tgl = (d: Date) =>
    14.05" sebagai teks akan salah, karena yang dibandingkan karakter
    string: "14.05" lebih besar dari "09.30" padahal 14.05 lebih kecil
    dari 21.30. */
-function kolomNilai(s: Sale, kolom: string): string | number | Date | null {
+function kolomNilai(s: BarisStruk, kolom: string): string | number | Date | null {
   switch (kolom) {
     case "no":
       return s.receiptNo;
     case "customer":
       return s.customer;
+    case "tag":
+      /* Tag kosong harus jadi null, bukan "": `urutkan` melempar nilai
+         kosong ke ekor secara terpisah dari arah, jadi "" akan ikut
+         terbawa sebagai nilai terkecil dan menduduki posisi pertama
+         saat urutan naik. */
+      return s.tag === "" ? null : s.tag;
     case "waktu":
       return new Date(s.completedIso);
     case "total":
@@ -157,6 +188,27 @@ export function PenjualanPage() {
     return data.struk.filter((s) => s.customer === nama);
   }, [customer, data.struk, daftarCustomer]);
 
+  /* Tag area per nama customer.
+
+     Satu peta untuk seluruh halaman: kolom Tag, pencarian, urutan, dan
+     rekap ongkir semuanya membaca dari sini. `petaTag` sudah menangani
+     nama yang tidak sama persis ("Bhas 7/17" -> "Bhaskara 7/17"), tag yang
+     tersimpan sebagai alias, dan nama yang tidak terdaftar di customers
+     sama sekali.
+
+     Wajib di atas `barisDetail`, bukan di bawah: kolom Tag ikut masuk ke
+     sana, jadi `tagUntukNama` harus sudah ada ketika barisDetail
+     dihitung. Menaruhnya setelahnya membuat barisDetail membaca nilai
+     yang belum pernah dihitung. */
+  const tagUntukNama = useMemo(
+    () =>
+      petaTag(
+        data.customers.map((c) => ({ id: c.id, name: c.name, tag: c.tag })),
+        data.customerAlias,
+      ),
+    [data.customers, data.customerAlias],
+  );
+
   /* Baris yang benar-benar tampil di tabel Detail Struk: `struk` sudah
      difilter rentang + customer, lalu disaring lagi oleh kotak pencarian
      dan diurutkan sesuai kolom yang diklik.
@@ -177,19 +229,24 @@ export function PenjualanPage() {
        ke sini, dan itu yang membuat tabnya berarti: tanpa filter ini,
        "hapus struk" tidak akan terlihat efeknya karena barisnya tetap
        nangkring di tabel. */
-    const perStatus =
+    const perStatus: BarisStruk[] = (
       status === "hapus"
         ? struk.filter((s) => s.status === "terhapus")
-        : struk.filter((s) => s.status !== "terhapus");
+        : struk.filter((s) => s.status !== "terhapus")
+    ).map((s) => ({ ...s, tag: tagUntukNama(s.customer).trim() }));
     const kunci = cari.trim().toLowerCase();
+    /* Tag ikut dicari karena area punya kaitan dengan kurir: satu area = satu
+       kurir, jadi "semua kiriman Sutorejo" lebih sering ditanyakan
+       daripada nama per struk. */
     const disaring = kunci
       ? perStatus.filter((s) =>
-          [s.receiptNo, s.customer, s.payment, s.status].some((t) => t.toLowerCase().includes(kunci)) ||
-          String(s.total).includes(kunci),
+          [s.receiptNo, s.customer, s.tag, s.payment, s.status].some((t) =>
+            t.toLowerCase().includes(kunci),
+          ) || String(s.total).includes(kunci),
         )
       : perStatus;
     return urutkan(disaring, urutan, kolomNilai);
-  }, [struk, status, cari, urutan]);
+  }, [struk, status, cari, urutan, tagUntukNama]);
 
   /* KOT bukan daftar struk: itu rekap per nama menu untuk rentang yang
      sama dengan laporan. Pakai data yang sudah difilter, supaya angka di
@@ -254,6 +311,48 @@ export function PenjualanPage() {
     }
   };
 
+  /* Tulis form Ubah Data.
+   *
+   * After success the range is refetched with `segarkanRentang`, not
+   * `muatRentang`: the latter skips an unchanged range, so the table would keep
+   * showing the old qty, price and notes even though the server has the new
+   * ones.
+   *
+   * The drawer is left open so the cashier can go straight to Cetak Ulang, but
+   * `strukAktif` has to be replaced with the refreshed object — it still points
+   * at the pre-edit copy, so the header subtotal and the print preview would
+   * keep using the old figures. */
+  const simpanUbah = async (payload: UbahStrukInput): Promise<HasilUbah> => {
+    setSedangProses(payload.saleId);
+    try {
+      const hasil = await ubahStruk(payload);
+      if (!hasil.ok) {
+        setCatatan({ tone: "warn", text: hasil.pesan ?? "Gagal menyimpan perubahan." });
+        return hasil;
+      }
+
+      await data.segarkanRentang(tgl(effectiveRange.from), tgl(effectiveRange.to));
+
+      const segar = (data.struk as Sale[]).find((s) => s.id === payload.saleId);
+      if (segar) setStrukAktif(segar);
+
+      setCatatan({
+        tone: "ok",
+        text:
+          (hasil.dibuang ?? 0) > 0
+            ? `${strukAktif?.receiptNo ?? "Struk"} disimpan. ${hasil.dibuang} item qty 0 dibuang.`
+            : `${strukAktif?.receiptNo ?? "Struk"} disimpan.`,
+      });
+      return hasil;
+    } catch (e) {
+      const pesan = `Gagal menyimpan: ${(e as Error).message}`;
+      setCatatan({ tone: "warn", text: pesan });
+      return { ok: false, pesan };
+    } finally {
+      setSedangProses(null);
+    }
+  };
+
   /* Grafik memakai struk yang sedang tampil, jadi grafik dan tabel di bawahnya
      tidak mungkin beda.
      Per jam HANYA untuk rentang satu hari — untuk rentang seminggu atau
@@ -302,7 +401,6 @@ export function PenjualanPage() {
      lama. Struk di halaman ini sudah terpotong rentang dan customer, jadi
      angkanya ikut terpotong — tidak perlu query kedua. */
   const ongkirRentang = useMemo(() => {
-    const tagUntukNama = petaTag(data.customers.map((c) => ({ name: c.name, tag: c.tag })));
     const rekap = rekapOngkirPerKurir(
       struk.map((x) => ({
         ongkir: x.ongkir ?? 0,
@@ -313,7 +411,7 @@ export function PenjualanPage() {
       tagUntukNama,
     );
     return { ...rekap, grup: grupPerKurir(rekap.rows) };
-  }, [struk, data.customers]);
+  }, [struk, tagUntukNama]);
 
   const kot = useMemo(
     () => buildKitchenOrderTicket(struk, effectiveRange.from, effectiveRange.to),
@@ -333,7 +431,6 @@ export function PenjualanPage() {
      filter customer yang sama — supaya angka di kertas sama dengan angka di
      layar. Kalau laporan menarik sendiri, dua laporan bisa berbeda. */
   const cetakLaporanSekarang = useMemo(() => {
-    const tagUntukNama = petaTag(data.customers.map((c) => ({ name: c.name, tag: c.tag })));
     return () => {
       if (struk.length === 0) return;
       const hidup = struk.filter((x) => x.status !== "terhapus");
@@ -377,7 +474,7 @@ export function PenjualanPage() {
         }),
       });
     };
-  }, [struk, data.customers, labelRentangLaporan, omsetRentang, jumlahTransaksi]);
+  }, [struk, tagUntukNama, labelRentangLaporan, omsetRentang, jumlahTransaksi]);
 
   /* Export CSV memakai struk yang sama dengan laporan: rentang + filter
      customer yang sama. Kalau menarik data sendiri, file yang diunduh bisa
@@ -689,14 +786,14 @@ export function PenjualanPage() {
           ) : null}
         </div>
 
-        {/* Tabel 6 kolom butuh min-w 720px. Di HP itu berarti tabel melebar
+        {/* Tabel 7 kolom butuh min-w 780px. Di HP itu berarti tabel melebar
             dua kali lipat layar dan kasir harus menggulir horizontal untuk
             membaca nomor struk — posisi yang tidak mungkin dipakai sambil
            tusuk order. Jadi di bawah lg tabel disembunyikan dan diganti
             daftar kartu: satu struk = satu kartu, isinya ditumpuk
             vertikal sehingga tidak ada yang terpotong. */}
         <div className="hidden overflow-x-auto lg:block">
-          <table className="w-full min-w-[720px] text-sm">
+          <table className="w-full min-w-[780px] text-sm">
             <thead>
               <tr className="border-b border-border text-left text-[11px] uppercase tracking-wider text-muted-foreground">
                 <SortableTh kolom="no" urutan={urutan} onToggle={toggle}>
@@ -704,6 +801,9 @@ export function PenjualanPage() {
                 </SortableTh>
                 <SortableTh kolom="customer" urutan={urutan} onToggle={toggle}>
                   Customer
+                </SortableTh>
+                <SortableTh kolom="tag" urutan={urutan} onToggle={toggle}>
+                  Tag
                 </SortableTh>
                 <SortableTh kolom="waktu" urutan={urutan} onToggle={toggle}>
                   Waktu
@@ -735,7 +835,23 @@ export function PenjualanPage() {
                   className="cursor-pointer border-b border-border transition-colors last:border-0 hover:bg-muted/50"
                 >
                   <td className="py-2.5 font-medium figure">{s.receiptNo}</td>
-                  <td className="py-2.5 max-w-[220px] truncate">{s.customer}</td>
+                  {/* Nama customer justru yang paling sering terpotong:
+                      "Puri Asri P3 No 32 Nenet" tidak muat di 220px. Yang
+                      terpotong harus bisa dibaca utuh — itu gunanya
+                      TeksPotong, bukan atribut `title` browser yang
+                      muncul terlambat dan posisinya tidak bisa diatur. */}
+                  <td className="py-2.5 max-w-[220px]">
+                    <TeksPotong teks={s.customer} />
+                  </td>
+                  <td className="py-2.5">
+                    {s.tag ? (
+                      <span className="rounded-full bg-muted px-2.5 py-0.5 text-xs font-semibold text-muted-foreground">
+                        {s.tag}
+                      </span>
+                    ) : (
+                      <span className="text-muted-foreground/60">{TANPA_TAG}</span>
+                    )}
+                  </td>
                   <td className="py-2.5 text-muted-foreground figure">{s.completedAt}</td>
                   <td className="py-2.5 pr-5 text-right font-semibold figure">{rupiah(s.total)}</td>
                   <td className="py-2.5 pl-5">
@@ -798,7 +914,7 @@ export function PenjualanPage() {
                   berbeda supaya kasir tahu harus mengetik apa. */}
               {barisDetail.length === 0 ? (
                 <tr>
-                  <td colSpan={6} className="py-10 text-center text-sm text-muted-foreground">
+                  <td colSpan={7} className="py-10 text-center text-sm text-muted-foreground">
                     {cari.trim()
                       ? `Tidak ada struk yang cocok dengan "${cari.trim()}".`
                       : "Tidak ada struk pada rentang dan filter ini."}
@@ -825,32 +941,58 @@ export function PenjualanPage() {
                 }}
                 className="cursor-pointer rounded-2xl border border-border bg-card p-3 text-left transition-colors active:bg-muted/60"
               >
-                {/* Baris 1: no struk + total. Nomor dipotong dari KIRI
-                    (`truncate` + `text-right`) karena sufiks "-0047" yang
-                    membedakan struk berada di ujung — kalau dipotong dari
-                    kanan, semua baris terlihat sama. */}
+                {/* Tiga baris, diurutkan dari yang paling sering dicari kasir ke yang
+                    paling jarang: siapa, berapa, struk mana, lalu status
+                    dan aksi.
+
+                    Versi sebelumnya menaruh no struk + total di baris
+                    pertama dengan nomor diratakan ke kanan. Akibatnya
+                    customer melorot ke baris kedua sementara baris
+                    pertama tetap tidak seimbang: tidak ada yang jelas
+                    mana yang utama, dan nomor struk terbaca sebagai
+                    milik total. Kasir mencari struk berdasarkan nama,
+                    bukan nomor. */}
                 <div className="flex items-baseline justify-between gap-3">
-                  <span className="min-w-0 flex-1 truncate text-right text-sm font-semibold figure">
-                    {s.receiptNo}
+                  <span className="min-w-0 flex-1 text-sm font-semibold">
+                    <TeksPotong teks={s.customer} />
                   </span>
                   <span className="shrink-0 text-base font-bold figure">
                     {rupiah(s.total)}
                   </span>
                 </div>
 
-                {/* Baris 2: customer. */}
-                <div className="mt-1 truncate text-sm">{s.customer}</div>
+                {/* Baris 2: no struk + tag area. Keduanya pengenal, jadi sebaris: tag
+                    di sebelah nomor struk langsung dibaca sebagai milik
+                    struk itu, dan tidak menambah tinggi kartu. */}
+                <div className="mt-1 flex items-center gap-2">
+                  <span className="min-w-0 flex-1 truncate text-xs text-muted-foreground figure">
+                    {s.receiptNo}
+                  </span>
+                  {s.tag ? (
+                    <span className="shrink-0 rounded-full bg-muted px-2 py-0.5 text-[10px] font-semibold text-muted-foreground">
+                      {s.tag}
+                    </span>
+                  ) : (
+                    <span className="shrink-0 text-xs text-muted-foreground/60">
+                      {TANPA_TAG}
+                    </span>
+                  )}
+                </div>
 
-                {/* Baris 3: waktu, status, aksi. */}
+                {/* Baris 3: waktu, status, aksi. Timestamp pakai bentuk
+                    ringkas — "6 Oktober 2026, 09:49" tidak muat berdampingan
+                    dengan tombol Hapus di 320px dan berakhir terpotong jadi
+                    "6 Okt...", jadi tanggalnya hilang justru di layar
+                    terkecil. */}
                 <div className="mt-2 flex items-center gap-2">
                   <span className="shrink-0 text-xs text-muted-foreground figure">
-                    {s.completedAt}
+                    {s.completedAtShort}
                   </span>
                   {s.status === "lunas" && <Pill tone="success">Lunas</Pill>}
                   {s.status === "belum" && <Pill tone="warning">Belum Lunas</Pill>}
                   {s.status === "terhapus" && <Pill tone="danger">Terhapus</Pill>}
                   <div
-                    className="ml-auto shrink-0"
+                    className="shrink-0"
                     onClick={(e) => e.stopPropagation()}
                   >
                     {s.status === "terhapus" ? (
@@ -906,6 +1048,7 @@ export function PenjualanPage() {
         onHapus={(s) => setKonfirmasi(s)}
         onRestore={(s) => void jalankan(s, "restore")}
         onHapusPermanen={(s) => setKonfirmasiPermanen(s)}
+        onSimpan={simpanUbah}
         sedangProses={strukAktif !== null && sedangProses === strukAktif.id}
       />
 

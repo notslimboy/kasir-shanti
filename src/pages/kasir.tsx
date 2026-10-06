@@ -13,6 +13,7 @@ import { useSetelan } from "@/lib/setelan";
 import { InputCustomer } from "@/components/ui/input-customer";
 import { saranCustomer } from "@/lib/cocok-customer";
 import { triggerSyncFromSheet } from "@/lib/sync-google-sheet";
+import { rapikanCatatan, ringkasCatatan } from "@/lib/catatan-item";
 import { cssStruk, strukHtml, type DataStruk } from "@/lib/struk";
 import { PageHeader, btnGhost, btnPrimary, inputClass } from "@/components/ui/kit";
 import { Pill } from "@/components/ui/card";
@@ -159,6 +160,10 @@ export function KasirPage() {
     setHolds(berikut);
     void cacheTulis(KUNCI_HOLD, { holds: berikut });
     setCart([]);
+    /* Id baris keranjang = client_id|varian, jadi baris yang sama bisa
+       muncul lagi di order berikutnya. Kalau state catatan ikut masih
+       terpasang, inputnya terbuka lagi tanpa kasir memintanya. */
+    setSCatatan(null);
     setCustomer("");
     setDiskon(0);
     /* Kalau masih ada isinya di layar, kasir akan mengira hold gagal lalu
@@ -180,6 +185,7 @@ export function KasirPage() {
      lagi dan menjual order yang sama dua kali. */
   const bukaHold = (h: HeldOrder) => {
     setCart(h.items);
+    setSCatatan(null);
     setCustomer(h.customer || TANPA_NAMA);
     const berikut = holds.filter((x) => x.id !== h.id);
     setHolds(berikut);
@@ -329,6 +335,27 @@ export function KasirPage() {
       c.map((x) => (x.id === key ? { ...x, price: Math.max(0, Math.round(harga)) } : x)),
     );
 
+  /* Catatan per baris: "tanpa sambel", "tanpa lontong". Kasir tidak
+     menekan tombol simpan atau enter untuk menyimpannya — nilai diambil
+     apa adanya saat blur, supaya kasir bisa mengetik lalu langsung
+     menekan item berikutnya tanpa satu pun langkah tambahan.
+
+     Hanya satu baris yang boleh terbuka. Dua input aktif di keranjang
+     yang sama berarti keyboard HP bouncing saat kasir mengetik. */
+  const [sCatatan, setSCatatan] = useState<string | null>(null);
+
+  /* Spasi tepi dibuang sebelum disimpan, dan isian yang jadi kosong
+     dihapus total — bukan tersimpan sebagai "". Lihat catatan-item.ts:
+     kolom note di database dan cetakan struk harus menerima nilai yang
+     sama persis untuk kasus "tidak ada catatan". */
+  const setCatatan = (key: string, teks: string) =>
+    setCart((c) => {
+      const bersih = rapikanCatatan(teks);
+      return c.map((x) =>
+        x.id === key ? { ...x, note: bersih } : x,
+      );
+    });
+
   const hargaBelumLengkap = cart.some((i) => i.custom && i.price <= 0);
 
   /* Ongkir lama customer terisi sendiri begitu namanya cocok dengan data
@@ -381,7 +408,7 @@ export function KasirPage() {
         name: i.name,
         price: i.price,
         qty: i.qty,
-        note: "",
+        note: i.note ?? "",
         tanpaBatas: i.stock === null,
       };
     });
@@ -410,6 +437,7 @@ export function KasirPage() {
         sendNote: "",
       });
       setCart([]);
+      setSCatatan(null);
       setDiskon(0);
       setCustomer("");
       setCartOpen(false);
@@ -556,6 +584,51 @@ export function KasirPage() {
                   {i.stock === null ? "Tanpa batas" : `sisa ${i.stock}`}
                 </span>
               </div>
+              {/* Catatan: hanya lewat sini. Ditaruh di bawah baris qty
+                  supaya baris tanpa catatan tetap setinggi aslinya —
+                  orderan tanpa permintaan khusus adalah kasus umum,
+                  jadi jangan memberatkan setiap baris untuknya. */}
+              {sCatatan === i.id ? (
+                <input
+                  autoFocus
+                  value={i.note ?? ""}
+                  onChange={(e) => setCatatan(i.id, e.target.value)}
+                  onBlur={() => setSCatatan(null)}
+                  onKeyDown={(e) => {
+                    /* Enter menutup, bukan memsplit baris: kasir sedang
+                       mengisi satu catatan, bukan menulis daftar. */
+                    if (e.key === "Enter") {
+                      e.preventDefault();
+                      setSCatatan(null);
+                    }
+                  }}
+                  placeholder="mis. tanpa sambel, tanpa lontong"
+                  aria-label={`Catatan ${i.name}`}
+                  className={
+                    "mt-2 h-9 w-full rounded-xl border border-input bg-card px-2.5 text-sm outline-none focus:border-ring focus:ring-2 focus:ring-ring/25"
+                  }
+                />
+              ) : i.note ? (
+                <button
+                  onClick={() => setSCatatan(i.id)}
+                  aria-label={`Ubah catatan ${i.name}`}
+                  className="mt-2 flex w-full items-center gap-1.5 rounded-xl bg-accent/60 px-2.5 py-1.5 text-left transition-colors hover:bg-accent"
+                >
+                  <span className="min-w-0 flex-1 truncate text-xs text-foreground">
+                    {i.note}
+                  </span>
+                  <span className="shrink-0 text-[11px] font-semibold text-muted-foreground">
+                    Ubah
+                  </span>
+                </button>
+              ) : (
+                <button
+                  onClick={() => setSCatatan(i.id)}
+                  className="mt-2 text-[11px] font-semibold text-muted-foreground underline-offset-2 transition-colors hover:text-foreground hover:underline"
+                >
+                  + Catatan
+                </button>
+              )}
             </motion.div>
           ))}
         </AnimatePresence>
@@ -621,7 +694,7 @@ export function KasirPage() {
       </div>
 
       <div className="mt-2.5 grid shrink-0 grid-cols-[auto_1fr] gap-2">
-        <button onClick={() => setCart([])} className={btnGhost}>
+        <button onClick={() => { setCart([]); setSCatatan(null); }} className={btnGhost}>
           Kosongkan
         </button>
         {/* Transaksi dengan baris custom yang harganya masih kosong tidak
@@ -1010,7 +1083,7 @@ export function KasirPage() {
                               {h.items.length} item · {h.savedAt}
                             </div>
                             <div className="mt-1 truncate text-[11px] text-muted-foreground">
-                              {h.items.map((x) => `${x.name} ×${fmtQty(x.qty)}`).join(", ")}
+                              {ringkasCatatan(h.items, fmtQty)}
                             </div>
                           </div>
                           <div className="shrink-0 text-sm font-bold figure">

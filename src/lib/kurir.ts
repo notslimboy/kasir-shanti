@@ -1,3 +1,5 @@
+import { inferTagArea, tagDariAlias } from "./tag-area";
+
 /* ==========================================================================
    Ongkir per kurir.
 
@@ -21,6 +23,9 @@ export const KURIR_GROUPS: { kurir: string; tags: string[] }[] = [
 /* Label yang sama dengan script.js — dipakai untuk struk yang benar-benar
    tidak punya jejak area. */
 export const TAG_TANPA_PEMETAAN = "Tanpa tag / Belum dipetakan";
+
+/** Bentuk baris `customer_aliases` yang dipakai untuk mencari tag. */
+export type AliasTag = { customer_id: number; alias: string };
 
 const KURIR_DARI_TAG = new Map(
   KURIR_GROUPS.flatMap((g) => g.tags.map((t) => [kunciTag(t), g.kurir] as const)),
@@ -60,19 +65,64 @@ function tagDariTeks(nama: string): string {
   return "";
 }
 
-/** Peta tag per pelanggan, siap dipakai oleh tagUntukNama. */
+/** Bentuk minimum customer untuk pencarian tag. */
+type CustomerPetaTag = { id?: string; name: string; tag: string | null };
+
+/** Peta tag per pelanggan, siap dipakai oleh tagUntukNama.
+ *
+ *  Urutan sumber tag, dari yang paling dapat dipercaya:
+ *
+ *  1. `customers.tag` — nilai yang benar-benar tersimpan.
+ *  2. Alias berawalan `tagalamat:` — tag yang disimpan di tabel alias
+ *     karena kolomnya belum terisi.
+ *  3. Nama pelanggan — supaya alias yang tidak punya tag pun bisa
+ *     diinferensi, bukan cuma nama yang ada di struk.
+ *  4. `inferTagArea` pada nama yang dicari — nama struk sering bukan
+ *     nama customers, jadi aturannya harus tetap berlaku di sini.
+ *
+ *  Yang tadinya hanya membaca kolom `tag` membuat "Anis BTH" tampil
+ *  tanpa area, padahal tag-nya `ITS` tersimpan di alias `ANIS BRIN`.
+ */
 export function petaTag(
-  customers: { name: string; tag: string | null }[],
+  customers: CustomerPetaTag[],
+  alias: readonly AliasTag[] = [],
 ): (nama: string) => string {
   const langsung = new Map<string, string>();
   const daftarTag: { nama: string; tag: string }[] = [];
+
+  /* Alias dikelompokkan per customer_id, bukan dicocokkan lewat nama.
+     Pencocokan nama rapuh: "Bhas Sari 38" dan "Bhaskara sari 38" beda satu
+     huruf, dan pencocokan longgar bisa menempelkan tag ke customer yang
+     kebetulan mirip — setelah itu struk masuk ke area yang salah. */
+  const aliasPerCustomer = new Map<number, string[]>();
+  for (const a of alias) {
+    const arr = aliasPerCustomer.get(a.customer_id);
+    if (arr) arr.push(a.alias);
+    else aliasPerCustomer.set(a.customer_id, [a.alias]);
+  }
+  /* `id` di UI dibuat dari kolom id numerik ("c1902"), jadi hubungannya
+     ke baris aslinya harus dibaca balik dari situ. Kalau format itu
+     berubah, tag tersimpan di alias ikut hilang — bukan error, hanya
+     area yang kosong. */
+  const nomorDari = (id: string | undefined): number | null => {
+    const m = /^c(\d+)$/.exec(String(id ?? ""));
+    return m ? Number(m[1]) : null;
+  };
+
   for (const c of customers) {
     const nama = c.name?.trim();
-    if (!nama || !c.tag) continue;
-    const tag = c.tag.trim();
+    if (!nama) continue;
+    /* Kolom tag lebih dulu. Alias `tagalamat:` baru dipakai kalau kolomnya
+       kosong — kalau keduanya ada dan berbeda, kolom yang menang karena
+       itu yang di-maintenance manual. */
+    const dariKolom = c.tag?.trim();
+    const dariAlias = tagDariAlias(aliasPerCustomer.get(nomorDari(c.id) ?? -1) ?? []);
+    const tag = dariKolom || dariAlias || inferTagArea(nama, aliasPerCustomer.get(nomorDari(c.id) ?? -1) ?? []);
+    if (!tag) continue;
     langsung.set(kunciTag(nama), tag);
     daftarTag.push({ nama, tag });
   }
+
   // Panjang dulu: "Bhaskara III" harus menang atas "Bhaskara".
   daftarTag.sort((a, b) => b.nama.length - a.nama.length);
 
@@ -83,7 +133,11 @@ export function petaTag(
     for (const s of daftarTag) {
       if (k.includes(kunciTag(s.nama))) return s.tag;
     }
-    return tagDariTeks(nama);
+    /* Nama di struk sering bukan nama di customers — kasir menyingkat
+       ("Bhas 7/17"), atau struk lama memakai nama yang sudah diganti. Aturan
+       lengkap di sini, karena nama yang dicari tidak ada di peta mana pun. */
+    const tebak = inferTagArea(nama);
+    return tebak || tagDariTeks(nama);
   };
 }
 

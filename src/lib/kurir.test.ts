@@ -49,6 +49,69 @@ describe("petaTag", () => {
     expect(cari("Ibu Tanti Sutorejo")).toBe("Sutorejo");
   });
 
+  it("nama tanpa jejak area mengembalikan string kosong, bukan undefined", () => {
+    /* Kolom Tag menampilkan tanda hubung kalau hasilnya kosong. Kalau
+       fungsi ini mengembalikan undefined, `s.tag === ""` tidak akan
+       pernah benar dan baris tanpa tag akan tampil kosong — bukan
+       ditandai, tapi kelihatan seperti tabel yang gagal dimuat. */
+    expect(cari("Sari Rina")).toBe("");
+    expect(cari("")).toBe("");
+  });
+
+  /* Bug yang ditemukan 6 Okt 2026: kolom Tag menampilkan tanda hubung
+     untuk "Anis BTH", padahal area-nya jelas ITS. */
+  it("membaca tag yang tersimpan di alias, bukan hanya di kolom tag", () => {
+    /* Kolom `customers.tag` tidak selalu terisi. Sebagian tag disimpan di
+       `customer_aliases` berawalan `tagalamat:` — dan "Anis BTH" tidak
+       memuat satu pun kata area, jadi tanpa alias-nya tag tidak akan
+       pernah ditemukan. Kolom Tag akan kosong, dan rekap ongkir per
+       kurir menghitung struk yang seharusnya ikut. */
+    const cariAlias = petaTag(
+      [{ id: "c126", name: "Anis BTH", tag: null }],
+      [{ customer_id: 126, alias: "ANIS BRIN" }],
+    );
+    expect(cariAlias("Anis BTH")).toBe("ITS");
+  });
+
+  it("kolom tag menang atas alias ketika keduanya ada dan berbeda", () => {
+    /* Kolom `tag` yang di-maintenance manual harus jadi acuan. Kalau
+       alias menang, memperbaiki tag di database tidak akan mengubah
+       apa pun yang tampil — dan yang salah ikut tersembunyi. */
+    const kedua = petaTag(
+      [{ id: "c1", name: "Sari", tag: "Sutorejo" }],
+      [{ customer_id: 1, alias: "tagalamat:GOJEK" }],
+    );
+    expect(kedua("Sari")).toBe("Sutorejo");
+  });
+
+  it("meneza tag dari nama customer yang tidak punya tag maupun alias", () => {
+    /* Baris customers tanpa tag dan tanpa alias `tagalamat:` masih
+       boleh punya area yang bisa dibaca dari namanya. Lebih baik
+       daripada kosong, selama tidak ada nilai tersimpan yang dilawan. */
+    const tanpaTag = petaTag([{ id: "c9", name: "Mulyosari Utara 11/58", tag: null }]);
+    expect(tanpaTag("Mulyosari Utara 11/58")).toBe("Mulyosari");
+  });
+
+  it("nama customer yang tidak ada di peta tetap di-inferensi", () => {
+    /* Struk lama memakai nama yang sudah diganti, dan kasir sering
+       menyingkat. Nama itu tidak ada di peta, tapi aturannya masih
+       berlaku — lebih baik daripada tanda hubung. */
+    const cari = petaTag([{ id: "c1", name: "Budi", tag: "Sutorejo" }]);
+    expect(cari("ITS W 6")).toBe("ITS");
+    expect(cari("Sutorejo Tengah 12/10")).toBe("Sutorejo");
+  });
+
+  it("customer dengan tag kosong dianggap tidak punya tag", () => {
+    /* Kolom tag di database boleh kosong. Baris seperti itu harus
+       diperlakukan sama dengan pelanggan yang tidak ada sama sekali. */
+    const cariKosong = petaTag([
+      { name: "Tanpa Tag", tag: null },
+      { name: "Tag Kosong", tag: "   " },
+    ]);
+    expect(cariKosong("Tanpa Tag")).toBe("");
+    expect(cariKosong("Tag Kosong")).toBe("");
+  });
+
   it("nama yang tidak ada jejak area = kosong, bukan tebakan", () => {
     expect(cari("Budi")).toBe("");
     expect(cari("Tanpa Tag")).toBe("");

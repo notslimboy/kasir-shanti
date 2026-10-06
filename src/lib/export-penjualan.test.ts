@@ -15,6 +15,7 @@ const struk = (over: Partial<Sale> = {}): Sale => ({
   completedOn: "2026-09-30",
   completedIso: "2026-09-30T06:05:00Z",
   completedAt: "30 Sep 2026 13.05",
+  completedAtShort: "30 Sep 13:05",
   total: 52500,
   payment: "Tunai",
   itemCount: 2,

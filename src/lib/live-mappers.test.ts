@@ -4,6 +4,7 @@ import {
   flag,
   kategoriProduk,
   labelTanggalPendek,
+  labelWaktuRingkas,
   labelWaktuLokal,
   tanggalISODari,
   mapCustomer,
@@ -165,6 +166,40 @@ describe("label waktu: HARUS zona waktu lokal", () => {
   it("tanggal tidak valid tidak bikin halaman crash", () => {
     expect(() => labelWaktuLokal("")).not.toThrow();
     expect(() => tanggalISODari(struk({ completed_at: "" }))).not.toThrow();
+  });
+
+  it("label ringkas memangkas nama bulan dan membuang tahun", () => {
+    /* Bentuknya harus muat di kartu struk 320px berdampingan dengan
+       tombol Hapus. Label penuh "6 Oktober 2026, 09:49" melebihi
+       lebar dan terpotong jadi "6 Okt..." — tanggal hilang justru di
+       layar terkecil, tempat yang paling tidak punya ruang. */
+    const d = new Date("2026-10-06T02:49:00.000Z");
+    const jam = String(d.getHours()).padStart(2, "0");
+    const menit = String(d.getMinutes()).padStart(2, "0");
+    expect(labelWaktuRingkas(d.toISOString())).toBe(`${d.getDate()} Okt ${jam}:${menit}`);
+  });
+
+  it("label ringkas memangkas semua bulan, bukan hanya Oktober", () => {
+    /* Satu bulan yang benar saja belum menutupi bulan yang salah: daftar
+       12 bulan disalin manual, jadi satu salah ketik akan lolos. */
+    const bulan = ["Jan", "Feb", "Mar", "Apr", "Mei", "Jun", "Jul", "Agu", "Sep", "Okt", "Nov", "Des"];
+    for (let m = 0; m < 12; m++) {
+      const d = new Date(Date.UTC(2026, m, 15, 2, 5));
+      const tampil = labelWaktuRingkas(d.toISOString());
+      expect(tampil).toContain(bulan[m]);
+      expect(tampil.split(" ")[1]).toBe(bulan[m]);
+    }
+  });
+
+  it("tidak ada tahun di label ringkas", () => {
+    /* Tahun tidak menambah informasi di layar yang sudah menampilkan satu
+       rentang tanggal, dan memakan lebar yang dibutuhkan jam. */
+    expect(labelWaktuRingkas(new Date("2026-10-06T02:49:00.000Z").toISOString())).not.toContain("2026");
+  });
+
+  it("label ringkas tidak crash pada timestamp rusak", () => {
+    expect(() => labelWaktuRingkas("")).not.toThrow();
+    expect(labelWaktuRingkas("")).toBe("");
   });
 });
 
