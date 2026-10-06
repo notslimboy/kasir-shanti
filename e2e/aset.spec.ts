@@ -18,6 +18,11 @@ const ASET = [
   "/thermal/logo-thermal-256-threshold.png",
   "/thermal/logo-thermal-320-threshold.png",
   "/favicon.png",
+  "/icons/icon-192.png",
+  "/icons/icon-512.png",
+  "/icons/icon-180.png",
+  "/icons/icon-maskable-192.png",
+  "/icons/icon-maskable-512.png",
 ];
 
 test.describe("aset statis", () => {
@@ -54,6 +59,19 @@ test.describe("aset statis", () => {
       rusak.width,
       "naturalWidth 0 berarti logo gagal decode — kemungkinan besar dapat HTML, bukan PNG",
     ).toBeGreaterThan(0);
+  });
+
+  test("manifest PWA disajikan sebagai JSON, bukan HTML", async ({ page }) => {
+    /* The launcher fetches this by path. A rewritten manifest is still valid
+       HTTP 200, so the browser keeps offering to install the app and the
+       home-screen icon falls back to a generic glyph with nothing to report. */
+    const res = await page.request.get("/manifest.webmanifest");
+    expect(res.status()).toBe(200);
+    expect(res.headers()["content-type"]).toMatch(/json|manifest/);
+
+    const isi = (await res.json()) as { name?: string; icons?: unknown[] };
+    expect(isi.name).toBe("Shanti Kasir");
+    expect(Array.isArray(isi.icons) && isi.icons.length).toBeTruthy();
   });
 
   test("halaman dalam tetap ditulis rewrite, hard refresh tidak 404", async ({ page }) => {

@@ -6,7 +6,7 @@
 
   "rewrites": [
     {
-      "source": "/((?!assets/|thermal/|favicon\\.png|manifest\\.webmanifest|robots\\.txt).*)",
+      "source": "/((?!assets/|thermal/|icons/|favicon\\.png|manifest\\.webmanifest|robots\\.txt).*)",
       "destination": "/index.html"
     }
   ]

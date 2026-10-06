@@ -2,9 +2,25 @@
 <html lang="id">
   <head>
     <meta charset="UTF-8" />
-    <link rel="icon" type="image/png" href="/favicon.png" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Kasir Shanti — Next</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+    <title>Shanti Kasir</title>
+    <meta name="description" content="Kasir Shanti Catering — transaksi, struk, piutang, dan data customer." />
+
+    <!-- Ikon. `favicon.png` hanya 192px, jadi home screen Android ambil yang
+         512 supaya tulisan "Shanti" tidak pecah; iOS mengabaikan favicon
+         dan hanya membaca apple-touch-icon. -->
+    <link rel="icon" type="image/png" sizes="192x192" href="/icons/icon-192.png" />
+    <link rel="icon" type="image/png" sizes="512x512" href="/icons/icon-512.png" />
+    <link rel="apple-touch-icon" href="/icons/icon-180.png" />
+
+    <!-- PWA: nama di home screen dan warna address bar. Cream diambil dari
+         warna dasar logo, supaya ikon dan status bar tidak clash. -->
+    <link rel="manifest" href="/manifest.webmanifest" />
+    <meta name="theme-color" content="#faf2de" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-title" content="Shanti Kasir" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="default" />
+
     <script>
       // Putuskan tema sebelum render pertama supaya tidak ada flash putih.
       (function () {

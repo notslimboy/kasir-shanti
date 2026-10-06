@@ -68,6 +68,23 @@ describe("vercel.json rewrite", () => {
     expect(ditulisUlang("/thermal/tidak-ada.png")).toBe(false);
   });
 
+  it("tidak menelan ikon PWA di /icons", () => {
+    /* Same trap as /thermal, and it costs the home-screen icon: Android
+       fetches these by manifest path, so a rewritten PNG arrives as HTML and
+       the launcher silently falls back to a generic glyph. Nothing in the app
+       would show it — it fails on the phone, not in the browser. */
+    for (const p of [
+      "/icons/icon-192.png",
+      "/icons/icon-512.png",
+      "/icons/icon-180.png",
+      "/icons/icon-maskable-192.png",
+      "/icons/icon-maskable-512.png",
+      "/manifest.webmanifest",
+    ]) {
+      expect(ditulisUlang(p), `${p} seharusnya dilayani apa adanya`).toBe(false);
+    }
+  });
+
   it("tidak menelan favicon", () => {
     /* Not what broke the receipt, but the same class of bug: the browser
        asks for it unprompted, so a rewritten favicon means the tab shows a
