@@ -1,4 +1,4 @@
-import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { createContext, startTransition, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 
 import {
   ambilInti,
@@ -79,6 +79,14 @@ type Toko = {
   /** Dipanggil /kasir dan /menu untuk memuat katalog. Aman dipanggil berkali-kali. */
   pastikanProduk: () => void;
   muatRentang: (dari?: string, sampai?: string) => Promise<void>;
+  /** Kunci rentang yang datanya SEDANG tampil (lihat `struk`). Dipakai
+   *  halaman Penjualan untuk membedakan "kosong" dari "belum selesai
+   *  ditarik" — keduanya tampil sebagai tabel kosong. */
+  rentangTampil: string | null;
+  /** Panaskan rentang di latar belakang tanpa menyentuh layar. Dipakai
+   *  halaman Penjualan supaya tab yang belum pernah dibuka sudah siap
+   *  sebelum diklik. Aman dipanggil berkali-kali. */
+  praRentang: (dari?: string, sampai?: string) => Promise<void>;
   /** Tarik ulang paksa + buang cache. Dipakai setelah hapus/restore struk,
    *  karena muatRentang biasa akan skip kalau rentangnya sama. */
   segarkanRentang: (dari?: string, sampai?: string) => Promise<void>;
@@ -167,6 +175,105 @@ function ambilProdukSekali(): Promise<DataProduk> {
   return produkBerjalan;
 }
 
+/* -------------------------------------------------------------------------
+   Rentang tanggal: memori proses + pemanasan di latar belakang
+   -------------------------------------------------------------------------
+
+   Tanggal di halaman Penjualan datang per rentang: Harian (hari ini),
+   Mingguan (7 hari), Bulanan (bulan berjalan), Custom. Tiap rentang punya
+   query sendiri, jadi sebelum ini SETIAP tab yang belum pernah dibuka
+   menunggu jaringan — terukur 346ms (minggu) dan 530ms (bulan) di server
+   lokal dengan latensi 150ms. Itu yang terasa "tidak instan": tabnya
+   langsung menyala, isinya menyusul.
+
+   Cache IndexedDB sudah ada, tapi hanya menolong tab yang SUDAH pernah
+   dibuka (terukur 27-36ms, praktis tanpa biaya). Yang kurang dua:
+
+     1. memori proses — pindah tab bolak-balik tidak perlu membuka
+        IndexedDB, menyalin ratusan baris, lalu mapping ulang; datanya
+        sudah ada sebagai objek di sini.
+     2. pemanasan — tab lain ditarik lebih dulu saat halaman tenang, jadi
+        klik pertama pun sudah memori.
+
+   Isi memori = isi IndexedDB (`rentang:<dari>|<sampai>`), jadi keduanya
+   bisa saling menggantikan. */
+type IsiRentang = { sales: SaleRow[]; items: [number, SaleItemRow[]][] };
+
+/* Batas entri memori. Tiga preset + beberapa rentang custom yang sedang
+   dipakai sudah tercakup; di atas itu yang dibuang entri paling lama
+   dipakai, bukan yang paling lama dibuat. */
+const MEMORI_RENTANG_MAKS = 8;
+
+/* Umur maksimal data memori sebelum divalidasi ulang di latar belakang.
+   Di bawah ini tab yang diklik disajikan apa adanya — menyegarkan data yang
+   baru saja diambil hanya membuat tabel berkedip tanpa ada yang berubah.
+   Kalau kasir lain menyimpan struk, yang berubah bukan cuma tabel ini:
+   halaman ini juga membuang cache rentang setiap kali struk dihapus,
+   di-restore, atau diubah dari sini. */
+const RENTANG_SEGAR_MS = 30_000;
+
+const memoriRentang = new Map<string, { ts: number; isi: IsiRentang }>();
+
+/* Satu promise per rentang. `praRentang` (pemanasan) dan `muatRentang`
+   (pembukaan sungguhan) bisa berjalan bersamaan untuk kunci yang sama —
+   tanpa peta ini, klik saat pemanasan sedang jalan = dua query penuh. */
+const rentangJalan = new Map<string, Promise<IsiRentang>>();
+
+/* Penanda generasi per rentang. Dipakai untuk membuang hasil tarikan yang
+   sudah kedaluwarsa: setelah struk dihapus atau di-restore, permintaan lama
+   untuk rentang yang sama tidak boleh menimpa cache yang baru. */
+const generasiRentang = new Map<string, number>();
+
+function simpanMemori(kunci: string, isi: IsiRentang): void {
+  /* Hapus dulu supaya urutan Map = urutan pemakaian terakhir (LRU kasar). */
+  memoriRentang.delete(kunci);
+  memoriRentang.set(kunci, { ts: Date.now(), isi });
+  while (memoriRentang.size > MEMORI_RENTANG_MAKS) {
+    const tertua = memoriRentang.keys().next().value;
+    if (tertua === undefined) break;
+    memoriRentang.delete(tertua);
+  }
+}
+
+/** Buang satu rentang dari memori dan naikkan generasinya. */
+function lupakanRentang(kunci: string): void {
+  memoriRentang.delete(kunci);
+  rentangJalan.delete(kunci);
+  generasiRentang.set(kunci, (generasiRentang.get(kunci) ?? 0) + 1);
+}
+
+/** Dipakai setelah menulis ke database: seluruh rentang basi sekaligus. */
+function lupakanSemuaRentang(): void {
+  for (const k of [...memoriRentang.keys()]) lupakanRentang(k);
+}
+
+/** Satu tarikan jaringan untuk satu rentang, dibagi ke semua pemanggil. */
+function tarikRentang(kunci: string, dari?: string, sampai?: string): Promise<IsiRentang> {
+  const ada = rentangJalan.get(kunci);
+  if (ada) return ada;
+
+  const generasi = (generasiRentang.get(kunci) ?? 0) + 1;
+  generasiRentang.set(kunci, generasi);
+
+  let jalan: Promise<IsiRentang>;
+  jalan = (async () => {
+    const { sales, items } = await ambilStruk(dari, sampai);
+    const isi: IsiRentang = { sales, items: [...items.entries()] };
+    /* Hasil dari generasi yang sudah dibuang (mis. struk barusan dihapus)
+       tidak boleh menimpa cache yang lebih baru. */
+    if (generasiRentang.get(kunci) === generasi) {
+      simpanMemori(kunci, isi);
+      await cacheTulis(`rentang:${kunci}`, isi);
+    }
+    return isi;
+  })().finally(() => {
+    if (rentangJalan.get(kunci) === jalan) rentangJalan.delete(kunci);
+  });
+
+  rentangJalan.set(kunci, jalan);
+  return jalan;
+}
+
 export function DataProvider({
   children,
   /** Matikan untuk memaksa tanpa jaringan — dipakai saat menguji tampilan. */
@@ -190,6 +297,11 @@ export function DataProvider({
   const produkJalan = useRef(false);
   const [struk, setStruk] = useState<Sale[]>([]);
   const [salesRentang, setSalesRentang] = useState<SaleRow[]>([]);
+  /* Kunci rentang yang datanya SEDANG tampil di `struk`. Halaman Penjualan
+     memakainya untuk membedakan "tidak ada struk di rentang ini" dari
+     "rentang ini belum selesai ditarik" — dua keadaan yang tampil sama
+     (tabel kosong) padahal artinya berbeda. */
+  const [rentangTampil, setRentangTampil] = useState<string | null>(null);
   const [ringkasStruk, setRingkasStruk] = useState<Sale[]>([]);
   const ringkasJalan = useRef(false);
 
@@ -200,42 +312,84 @@ export function DataProvider({
   const rentangToken = useRef(0);
   const rentangTerakhir = useRef<string | null>(null);
 
-  const muatRentang = useCallback(async (dari?: string, sampai?: string) => {
-    const kunci = `${dari ?? ""}|${sampai ?? ""}`;
-    /* Render ulang (StrictMode, filter customer, ganti tab lain) sering
-       memanggil ini dengan rentang yang sama. Tanpa penjaga, satu klik
-       = satu query penuh. */
-    if (rentangTerakhir.current === kunci) return;
-    rentangTerakhir.current = kunci;
-    const token = ++rentangToken.current;
-    const cacheKey = `rentang:${kunci}`;
-    const masihJalan = token === rentangToken.current;
-
-    /* 1. Isi layar dari cache lebih dulu — ini yang bikin pindah tab terasa
-          seketika, bukan menunggu query. */
-    const cached = await cacheBaca<{ sales: SaleRow[]; items: [number, SaleItemRow[]][] }>(cacheKey);
-    if (cached?.data && masihJalan) {
-      setSalesRentang(cached.data.sales);
+  /** Pasang satu isi rentang ke layar, kalau memang masih yang diminta. */
+  const tampilkanRentang = useCallback((kunci: string, isi: IsiRentang, token: number) => {
+    if (token !== rentangToken.current) return;
+    /* Sebagai transition: mengganti rentang bisa berarti memetakan dan
+       merender ratusan struk, dan itu dulu dikerjakan di task yang sama
+       dengan kliknya — terukur 81ms sebelum tabnya sendiri terlihat
+       tersorot. Dengan transition, sorotan tabnya jalan di frame berikutnya
+       dan tabelnya menyusul. */
+    startTransition(() => {
+      setSalesRentang(isi.sales);
       try {
-        setStruk(strukUntukUI(cached.data.sales, keItemRows(cached.data.items)));
+        setStruk(strukUntukUI(isi.sales, keItemRows(isi.items)));
+        setRentangTampil(kunci);
       } catch {
         // Bentuk cache tidak cocok dengan kode sekarang: abaikan, tarik ulang.
       }
-    }
+    });
+  }, []);
 
-    /* 2. Tarik data asli diam-diam; layar tetap menampilkan yang cached
-          sampai hasil baru datang. */
+  const muatRentang = useCallback(
+    async (dari?: string, sampai?: string) => {
+      const kunci = `${dari ?? ""}|${sampai ?? ""}`;
+      /* Render ulang (StrictMode, filter customer, ganti tab lain) sering
+         memanggil ini dengan rentang yang sama. Tanpa penjaga, satu klik
+         = satu query penuh. */
+      if (rentangTerakhir.current === kunci) return;
+      rentangTerakhir.current = kunci;
+      const token = ++rentangToken.current;
+
+      /* 0. Memori proses dulu, dan TANPA await: pindah tab yang sudah
+            pernah dibuka tidak menyentuh IndexedDB maupun jaringan, jadi
+            isinya sudah benar sebelum frame berikutnya. */
+      const diMemori = memoriRentang.get(kunci);
+      if (diMemori) {
+        tampilkanRentang(kunci, diMemori.isi, token);
+        /* Data lama tetap tampil sambil diam-diam diperbarui; kalau masih
+           segar, tidak ada yang perlu ditarik sama sekali. */
+        if (Date.now() - diMemori.ts > RENTANG_SEGAR_MS) {
+          void tarikRentang(kunci, dari, sampai)
+            .then((isi) => tampilkanRentang(kunci, isi, token))
+            .catch(() => {});
+        }
+        return;
+      }
+
+      /* 1. Isi layar dari IndexedDB lebih dulu — ini yang bikin pindah tab
+            terasa seketika, bukan menunggu query. */
+      const cached = await cacheBaca<IsiRentang>(`rentang:${kunci}`);
+      if (cached?.data) tampilkanRentang(kunci, cached.data, token);
+
+      /* 2. Tarik data asli diam-diam; layar tetap menampilkan yang cached
+            sampai hasil baru datang. */
+      try {
+        const isi = await tarikRentang(kunci, dari, sampai);
+        tampilkanRentang(kunci, isi, token);
+      } catch (e) {
+        // Cache sudah menampilkan sesuatu: kegagalan jaringan tidak boleh
+        // mengosongkan layar.
+        if (!cached?.data) setError((e as Error).message);
+        rentangTerakhir.current = null;
+      }
+    },
+    [tampilkanRentang],
+  );
+
+  /* Panaskan satu rentang di latar belakang: tarik + simpan ke cache, TANPA
+     menyentuh layar. Dipanggil halaman Penjualan untuk tab yang belum
+     dibuka, supaya klik pertama pun tidak menunggu jaringan.
+     Aman dipanggil berkali-kali: yang sudah ada di memori dilewati, dan
+     tarikan yang sedang jalan dipakai bersama (lihat `tarikRentang`). */
+  const praRentang = useCallback(async (dari?: string, sampai?: string) => {
+    const kunci = `${dari ?? ""}|${sampai ?? ""}`;
+    const diMemori = memoriRentang.get(kunci);
+    if (diMemori && Date.now() - diMemori.ts <= RENTANG_SEGAR_MS) return;
     try {
-      const { sales, items } = await ambilStruk(dari, sampai);
-      if (!masihJalan) return;
-      setSalesRentang(sales);
-      setStruk(strukUntukUI(sales, items));
-      await cacheTulis(cacheKey, { sales, items: [...items.entries()] });
-    } catch (e) {
-      // Cache sudah menampilkan sesuatu: kegagalan jaringan tidak boleh
-      // mengosongkan layar.
-      if (!cached?.data) setError((e as Error).message);
-      rentangTerakhir.current = null;
+      await tarikRentang(kunci, dari, sampai);
+    } catch {
+      /* Latar belakang: gagal berarti tab itu nanti menarik sendiri. */
     }
   }, []);
 
@@ -250,9 +404,17 @@ export function DataProvider({
    *
    * Cache dibuang lebih dulu, bukan sesudah: kalau cache lama dipakai
    * mengisi layar, layar sempat menampilkan data basi sebelum request
-   * selesai, dan itu yang paling bikin kesal. */
+   * selesai, dan itu yang paling bikin kesal.
+   *
+   * Memori proses ikut dibuang — SELURUHNYA, bukan cuma rentang yang sedang
+   * tampil. Struk yang barusan dihapus juga ada di salinan memori rentang
+   * lain (Mingguan/Bulanan); kalau hanya rentang aktif yang dibuang, tabel
+   * di tab sebelah masih menampilkan struk yang sudah hilang sampai cache-nya
+   * kedaluwarsa sendiri. Ini sama dengan yang dilakukan impor struk: satu
+   * tulisan membatalkan semua rentang. */
   const segarkanRentang = useCallback(
     async (dari?: string, sampai?: string) => {
+      lupakanSemuaRentang();
       await cacheHapus(`rentang:${dari ?? ""}|${sampai ?? ""}`);
       rentangTerakhir.current = null;
       await muatRentang(dari, sampai);
@@ -267,6 +429,7 @@ export function DataProvider({
    * benar karena KPI-nya dibaca dari riwayat penuh, jadi gejalanya menarik:
    * dashboard terlihat masuk, laporan tidak. */
   const invalidasiSetelahTulis = useCallback(async () => {
+    lupakanSemuaRentang();
     await cacheHapusAwalan("rentang:");
     await cacheHapus("ringkas30");
     rentangTerakhir.current = null;
@@ -411,7 +574,13 @@ export function DataProvider({
     setProdukData(null);
     resetProdukStale();
     rentangTerakhir.current = null;
+    /* Rentang ikut dibuang. Tombol "Muat ulang" di Penjualan ada supaya
+       kasir bisa memaksa angka terbaru; kalau cache rentang dibiarkan,
+       yang terjadi justru sebaliknya — tabel diisi ulang dari salinan lama
+       dan permintaannya tidak pernah keluar. */
+    lupakanSemuaRentang();
     await cacheHapus("inti", "produk");
+    await cacheHapusAwalan("rentang:");
     await muatInti();
     const d = await ambilProdukSekali().catch(() => null);
     if (d) {
@@ -458,6 +627,8 @@ export function DataProvider({
         diambilPada: inti.diambilPada,
         pastikanProduk,
         muatRentang,
+        rentangTampil,
+        praRentang,
         segarkanRentang,
         invalidasiSetelahTulis,
         perbaruiSetelahTulis,
@@ -474,12 +645,14 @@ export function DataProvider({
       diambilPada: null,
       pastikanProduk,
       muatRentang,
+      rentangTampil,
+      praRentang,
       segarkanRentang,
       invalidasiSetelahTulis,
       perbaruiSetelahTulis,
       muatUlang: muatSemuanya,
     };
-  }, [status, error, inti, struk, salesRentang, ringkasStruk, produkData, produkDipinta, pastikanProduk, muatRentang, segarkanRentang, invalidasiSetelahTulis, perbaruiSetelahTulis, muatSemuanya]);
+  }, [status, error, inti, struk, salesRentang, rentangTampil, ringkasStruk, produkData, produkDipinta, pastikanProduk, muatRentang, praRentang, segarkanRentang, invalidasiSetelahTulis, perbaruiSetelahTulis, muatSemuanya]);
 
   return <Ctx.Provider value={nilai}>{children}</Ctx.Provider>;
 }

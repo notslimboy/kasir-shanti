@@ -73,12 +73,18 @@ export function presetRentang(): { id: string; label: string; range: () => DateR
 export function DateRangePicker({
   value,
   onChange,
+  onPratinjau,
   className,
   align = "start",
   showPresets = true,
 }: {
   value: DateRange | null;
   onChange: (r: DateRange | null) => void;
+  /** Rentang sudah pasti TAPI belum diterapkan (klik tanggal kedua, sebelum
+   *  "Terapkan" ditekan). Dipakai halaman laporan untuk menarik datanya
+   *  lebih dulu, supaya saat diterapkan rentangnya sudah ada — jeda antara
+   *  klik kedua dan "Terapkan" itu cukup untuk satu query selesai. */
+  onPratinjau?: (r: DateRange) => void;
   className?: string;
   align?: "start" | "end";
   showPresets?: boolean;
@@ -142,9 +148,14 @@ export function DateRangePicker({
       return;
     }
     // klik kedua: tutup rentang. Mundur juga ditoleransi.
-    setDraft(day0 < anchor ? { from: day0, to: anchor } : { from: anchor, to: day0 });
+    const lengkap = day0 < anchor ? { from: day0, to: anchor } : { from: anchor, to: day0 };
+    setDraft(lengkap);
     setAnchor(null);
     setHover(null);
+    /* Rentangnya sudah pasti; yang tersisa cuma menekan "Terapkan". Beri
+       tahu pemanggil sekarang, bukan nanti, supaya tarikannya berjalan
+       selama kasir membaca ringkasan dan menggerakkan tangan. */
+    onPratinjau?.(lengkap);
   };
 
   const moveCursor = (days: number) => {

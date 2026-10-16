@@ -303,6 +303,14 @@ legacy/             old stack documentation — does not describe this repo
 - CSV import and order grouping follow the old Bulk Input
   (`groupKey = customer|chatDate|payment|shipping`). Do not change the 9-column
   format.
+- Penjualan range data is cached twice — `memoriRentang` (process memory, the
+  fast path) and `cache-db.ts` under `rentang:<from>|<to>` — and warmed ahead
+  by `praRentang`. That is why switching Harian/Mingguan/Bulanan issues no
+  request at all; `e2e/penjualan.spec.ts` asserts it. Any new write path must
+  invalidate both, via `segarkanRentang` (one range, after delete/restore/ubah)
+  or `invalidasiSetelahTulis` / `lupakanSemuaRentang` (everything, after import
+  or the Muat ulang button, `muatUlang`). Skipping that shows deleted struk
+  again.
 - Every new struk — from Kasir and from Import Pesanan alike — is written with
   `paid_amount = 0`, so it starts as **Belum Lunas**. Payment is recorded from
   the Piutang page. Status is derived (`paid_amount >= total`), so writing the

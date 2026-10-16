@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   Area,
   AreaChart,
@@ -33,7 +33,7 @@ import { ChartDonut } from "@/components/chart-donut";
 import { CHART_ANIM } from "@/components/chart-motion";
 import { PageHeader, StatTile, Tabs, btnGhost } from "@/components/ui/kit";
 import { Select } from "@/components/ui/select";
-import { DateRangePicker, type DateRange } from "@/components/ui/date-range";
+import { DateRangePicker, presetRentang, type DateRange } from "@/components/ui/date-range";
 import { rupiah, rupiahShort } from "@/lib/format";
 import type { Sale } from "@/lib/sale";
 import { menuTerlarisDari, trenPerHari, trenPerJam } from "@/lib/ringkasan";
@@ -74,6 +74,20 @@ const TANPA_TAG = "—";
 /** "2026-09-30" dari Date lokal — dipakai untuk query rentang ke server. */
 const tgl = (d: Date) =>
   `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+
+/* Preset tanggal. Dipakai DUA tempat: menentukan rentang yang sedang
+   tampil, dan memanaskan tab lain di latar belakang. Kalau perhitungannya
+   ditulis dua kali, yang dipanaskan bisa bukan rentang yang nanti diklik —
+   dan tabelnya tetap menunggu jaringan tanpa ada yang sadar. */
+const PRESET_TANGGAL = ["Harian", "Mingguan", "Bulanan"] as const;
+
+function rentangPreset(id: string, hariIni: Date): DateRange | null {
+  const back = (n: number) => new Date(hariIni.getFullYear(), hariIni.getMonth(), hariIni.getDate() - n + 1);
+  if (id === "Mingguan") return { from: back(7), to: hariIni };
+  if (id === "Bulanan") return { from: new Date(hariIni.getFullYear(), hariIni.getMonth(), 1), to: hariIni };
+  if (id === "Harian") return { from: hariIni, to: hariIni };
+  return null;
+}
 
 /* Baris tabel + tag areanya.
 
@@ -156,11 +170,7 @@ export function PenjualanPage() {
 
   const effectiveRange = useMemo(() => {
     if (custom) return custom;
-    const today = hariIni;
-    const back = (n: number) => new Date(today.getFullYear(), today.getMonth(), today.getDate() - n + 1);
-    if (range === "Mingguan") return { from: back(7), to: today };
-    if (range === "Bulanan") return { from: new Date(today.getFullYear(), today.getMonth(), 1), to: today };
-    return { from: today, to: today };
+    return rentangPreset(range, hariIni) ?? { from: hariIni, to: hariIni };
   }, [custom, range, hariIni]);
 
   const jumlahHari = useMemo(() => {
@@ -177,6 +187,72 @@ export function PenjualanPage() {
     void data.muatRentang(tgl(effectiveRange.from), tgl(effectiveRange.to));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [effectiveRange.from.getTime(), effectiveRange.to.getTime(), data.status]);
+
+  /* Panaskan tab tanggal yang lain di latar belakang.
+
+     Tiap rentang punya query sendiri ke server: Tanpa ini, tab yang belum
+     pernah dibuka menunggu jaringan — terukur 346ms (Mingguan) dan 530ms
+     (Bulanan) pada server lokal dengan latensi 150ms — dan itu yang terasa
+     "tidak instan": tabnya menyala seketika, isinya menyusul. Setelah
+     dipanaskan, pindah tab tidak mengeluarkan permintaan apa pun.
+
+     Dijalankan berurutan dan setelah jeda, bukan serentak: yang pertama
+     ditarik harus rentang yang sedang dilihat, dan tiga permintaan besar
+     sekaligus hanya membuat tarikan itu sendiri lebih lambat. Rentang yang
+     sudah ada di memori dilewati oleh `praRentang` sendiri, jadi efek ini
+     boleh jalan sesering apa pun. */
+  const praRentang = useRef(data.praRentang);
+  praRentang.current = data.praRentang;
+  const kunciRentangAktif = `${tgl(effectiveRange.from)}|${tgl(effectiveRange.to)}`;
+  /* Antrean pemanasan sengaja TIDAK dibatalkan saat rentang berganti.
+     Versi pertama membatalkannya di cleanup, dan justru itu yang bikin
+     pemanasannya tidak pernah selesai: klik Mingguan lalu Bulanan dalam
+     200ms membatalkan antrean yang sedang jalan, jadi tidak ada satu pun
+     rentang yang benar-benar selesai ditarik — dan tab berikutnya tetap
+     menunggu jaringan, persis seperti sebelum ada pemanasan. Yang
+     dibatalkan hanya saat halaman ditinggalkan. */
+  const praAntre = useRef<Promise<void>>(Promise.resolve());
+  const praBatal = useRef(false);
+  useEffect(
+    () => () => {
+      praBatal.current = true;
+    },
+    [],
+  );
+  useEffect(() => {
+    /* Baru setelah rentang yang dilihat selesai ditarik: yang pertama harus
+       halaman ini sendiri, bukan tiga rentang lain yang belum tentu dibuka. */
+    if (data.rentangTampil !== kunciRentangAktif) return;
+    /* Preset tab di atas, ditambah preset kalender yang TIDAK sama dengan
+       salah satunya ("30 hari" — rentang custom yang paling sering dipilih).
+       "Bulan lalu" sengaja tidak dipanaskan: sebulan penuh baris untuk
+       pilihan yang jarang, dan pilihan itu tetap punya penanda "memuat"
+       kalau memang diambil. */
+    const kandidat = [
+      ...PRESET_TANGGAL.filter((id) => id !== range)
+        .map((id) => rentangPreset(id, hariIni))
+        .filter((r): r is DateRange => r !== null),
+      ...presetRentang().filter((p) => p.id === "30").map((p) => p.range()),
+    ];
+    const lain = kandidat.filter(
+      (r, i) => kandidat.findIndex((x) => tgl(x.from) === tgl(r.from) && tgl(x.to) === tgl(r.to)) === i,
+    );
+    /* Berurutan, satu per satu: tiga tarikan besar sekaligus hanya membuat
+       tarikan yang sedang dilihat ikut lambat. Mulai tanpa jeda — halaman
+       sudah terisi saat efek ini jalan, jadi tidak ada yang ditunda. */
+    praAntre.current = praAntre.current.then(async () => {
+      for (const r of lain) {
+        if (praBatal.current) return;
+        await praRentang.current(tgl(r.from), tgl(r.to));
+      }
+    });
+  }, [kunciRentangAktif, data.rentangTampil, range, hariIni]);
+
+  /* Rentang yang tampil sudah selesai ditarik? Kalau belum, angka di layar
+     masih milik rentang sebelumnya — dan tabel kosong bisa berarti dua hal
+     yang berbeda: "tidak ada struk di rentang ini" atau "belum selesai
+     ditarik". Tanpa penanda, yang kedua terbaca sebagai yang pertama. */
+  const menungguRentang = data.rentangTampil !== kunciRentangAktif;
 
   const daftarCustomer = data.customers;
 
@@ -628,11 +704,26 @@ export function PenjualanPage() {
             setCustom(r);
             if (r) setRange("Custom");
           }}
+          /* Klik tanggal kedua sudah menentukan rentangnya. Tarik sekarang:
+             tombol "Terapkan" masih perlu satu gerakan tangan lagi, dan
+             selama itu datanya sudah mendarat. */
+          onPratinjau={(r) => void data.praRentang(tgl(r.from), tgl(r.to))}
         />
 
         <span className="self-start rounded-full bg-muted px-3 py-1.5 text-xs font-semibold text-muted-foreground figure sm:self-auto">
           {jumlahHari} hari
         </span>
+
+        {/* Angka di kartu dan tabel masih milik rentang sebelumnya sampai
+            tarikan selesai. Jeda itu biasanya tidak terasa (rentangnya sudah
+            dipanaskan lebih dulu), tapi pada rentang custom yang benar-benar
+            baru permintaannya harus jalan dulu — dan tanpa keterangan, layar
+            yang tidak berubah terbaca sebagai tombol yang tidak bekerja. */}
+        {menungguRentang ? (
+          <span className="self-start text-xs font-semibold text-muted-foreground sm:self-auto">
+            Memuat rentang…
+          </span>
+        ) : null}
       </div>
 
       {/* KPI dihitung dari struk yang sedang ditampilkan, bukan dari angka
@@ -1018,16 +1109,20 @@ export function PenjualanPage() {
                     ringkas — "6 Oktober 2026, 09:49" tidak muat berdampingan
                     dengan tombol Hapus di 320px dan berakhir terpotong jadi
                     "6 Okt...", jadi tanggalnya hilang justru di layar
-                    terkecil. */}
-                <div className="mt-2 flex items-center gap-2">
-                  <span className="shrink-0 text-xs text-muted-foreground figure">
+                    terkecil.
+
+                    `flex-wrap` pasangan dari `whitespace-nowrap` di Pill:
+                    kalau ruang benar-benar habis, yang berpindah baris adalah
+                    seluruh pill, bukan tulisannya. */}
+                <div className="mt-2 flex flex-wrap items-center gap-x-2 gap-y-1">
+                  <span className="text-xs text-muted-foreground figure">
                     {s.completedAtShort}
                   </span>
                   {s.status === "lunas" && <Pill tone="success">Lunas</Pill>}
                   {s.status === "belum" && <Pill tone="warning">Belum Lunas</Pill>}
                   {s.status === "terhapus" && <Pill tone="danger">Terhapus</Pill>}
                   <div
-                    className="shrink-0"
+                    className="ml-auto shrink-0"
                     onClick={(e) => e.stopPropagation()}
                   >
                     {s.status === "terhapus" ? (
