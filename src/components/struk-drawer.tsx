@@ -1,4 +1,4 @@
-import { useRef, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 import { AnimatePresence, motion } from "motion/react";
 
 import { Drawer } from "@/components/ui/drawer";
@@ -11,6 +11,8 @@ import { formatRupiah } from "@/lib/struk";
 import { useSetelan } from "@/lib/setelan";
 import type { HasilUbah, UbahStrukInput } from "@/lib/supabase-tulis";
 import { InputRupiah } from "@/components/ui/input-rupiah";
+import { cariOpsiItem, opsiItemStruk, type OpsiItemStruk } from "@/lib/pilih-item-struk";
+import type { Product } from "@/lib/menu-seed";
 import type { Sale } from "@/lib/sale";
 
 /* ==========================================================================
@@ -39,8 +41,24 @@ const STATUS_LABEL = { lunas: "Lunas", belum: "Belum Lunas", terhapus: "Dihapus"
 
 /* `id` dibuat wajib di sini (walau di `SaleLine` opsional) karena baris form
    selalu dibangun lewat `formDariStruk`, dan hanya baris form yang dikirim ke
-   `ubahStruk`. `id: 0` berarti baris tanpa primary key — lihat `formDariStruk`. */
-type BarisForm = { id: number; name: string; variant: string; qty: number; price: number; note: string };
+   `ubahStruk`. `id: 0` berarti baris tanpa primary key — lihat `formDariStruk`.
+
+   `baru` menandai baris yang ditambahkan lewat "Tambah item": baris itu belum
+   ada di `sale_items`, jadi `ubahStruk` harus INSERT, bukan PATCH. Ditandai
+   eksplisit karena baris hasil baca yang tidak punya primary key juga ber-id 0,
+   dan menebak keduanya sama berarti menulis ulang seluruh struk. `name` dan
+   varian hanya dipakai jalur INSERT itu. */
+type BarisForm = {
+  id: number;
+  name: string;
+  variant: string;
+  qty: number;
+  price: number;
+  note: string;
+  baru?: boolean;
+  productClientId?: string;
+  variantClientId?: string;
+};
 type FormUbah = { customer: string; sendNote: string; lines: BarisForm[] };
 
 const FORM_KOSONG: FormUbah = { customer: "", sendNote: "", lines: [] };
@@ -80,6 +98,10 @@ export function StrukDrawer({
   onRestore,
   onHapusPermanen,
   onSimpan,
+  produk,
+  onMintaProduk,
+  produkDimuat = false,
+  produkMemuat = false,
   sedangProses = false,
 }: {
   sale: Sale | null;
@@ -94,6 +116,18 @@ export function StrukDrawer({
    *  karena tanpa ini "✓ Tersimpan" cuma bohong: tidak ada yang masuk
    *  database dan seluruh ketikan hilang saat drawer ditutup. */
   onSimpan?: (payload: UbahStrukInput) => Promise<HasilUbah>;
+  /** Katalog menu untuk "Tambah item". Kosong = katalognya belum dimuat. */
+  produk?: Product[];
+  /** Dipanggil saat kasir membuka pemilih menu. Katalog Penjualan dimuat
+   *  sesuai kebutuhan: 1.095 produk tidak diambil untuk struk yang cuma
+   *  dilihat. */
+  onMintaProduk?: () => void;
+  /** True kalau katalog SUDAH selesai ditarik. "Belum dimuat" dan "memang
+   *  kosong" pesannya berbeda, dan menyamakan keduanya membuat kasir mengira
+   *  menunya sudah dihapus. */
+  produkDimuat?: boolean;
+  /** True selagi katalog ditarik. */
+  produkMemuat?: boolean;
   /** True selama request ke server berjalan — tombol dinonaktifkan supaya
    *  dua klik cepat tidak mengirim dua permintaan. */
   sedangProses?: boolean;
@@ -111,6 +145,16 @@ export function StrukDrawer({
      tetap 48mm dan keluar terpotong. */
   const [setelan] = useSetelan();
   const [form, setForm] = useFormUbah();
+  /* Pemilih menu untuk baris baru. Ditutup setiap kali drawer pindah struk,
+     supaya daftar pilihan tidak menyambung dari struk sebelumnya. */
+  const [pilihBuka, setPilihBuka] = useState(false);
+  const [cariMenu, setCariMenu] = useState("");
+
+  /* Opsi dibangun dari katalog yang sudah dimuat; kosong selama katalog
+     belum diminta, dan itu ditampilkan sebagai "memuat", bukan sebagai
+     "menu tidak ada". */
+  const semuaOpsi = useMemo(() => opsiItemStruk(produk ?? []), [produk]);
+  const { tampil: opsiTampil, total: opsiTotal } = cariOpsiItem(semuaOpsi, cariMenu);
 
   /* Buka dengan isi struk yang dipilih. Dilakukan di sini supaya panel
      selalu mulai dari data yang benar, tidak dari sisa edit sebelumnya. */
@@ -121,6 +165,8 @@ export function StrukDrawer({
     setMode("lihat");
     setTersimpan(false);
     setGalatSimpan(null);
+    setPilihBuka(false);
+    setCariMenu("");
     setForm(formDariStruk(sale));
   }
 
@@ -136,9 +182,42 @@ export function StrukDrawer({
       lines: f.lines.map((l, idx) => (idx === i ? { ...l, ...patch } : l)),
     }));
 
+  /* Item yang tidak tercatat saat transaksi dulu — pelanggan menambah satu
+     menu lewat chat, kasir lupa memasukkannya. Tanpa ini satu-satunya jalan
+     adalah membatalkan struk dan mengetik ulang seluruh orderan.
+
+     Baris baru mulai dari qty 1 dan harga variannya; varian berharga custom
+     mulai dari 0 karena hanya kasir yang tahu nominalnya. */
+  const tambahItem = (o: OpsiItemStruk) => {
+    setForm((f) => ({
+      ...f,
+      lines: [
+        ...f.lines,
+        {
+          id: 0,
+          baru: true,
+          name: o.name,
+          variant: o.variant,
+          qty: 1,
+          price: o.price,
+          note: "",
+          productClientId: o.productClientId,
+          variantClientId: o.variantClientId,
+        },
+      ],
+    }));
+    setPilihBuka(false);
+    setCariMenu("");
+  };
+
+  const bukaPilihItem = () => {
+    onMintaProduk?.();
+    setPilihBuka(true);
+  };
+
   /* Menulis ke server. Gagal = tetap di mode edit dan alasannya ditampilkan;
      keluar dari mode edit padahal tidak ada yang tersimpan adalah cara paling
-     cepatittekan kasir mengira perubahannya sudah masuk. */
+     cepat membuat kasir mengira perubahannya sudah masuk. */
   const simpan = async () => {
     if (!sale || !onSimpan || menyimpan) return;
     setGalatSimpan(null);
@@ -155,6 +234,13 @@ export function StrukDrawer({
           qty: l.qty,
           price: l.price,
           note: l.note,
+          /* Hanya baris baru yang dibawa; baris lama cukup id karena PATCH
+             tidak menyentuh nama maupun variannya. */
+          baru: l.baru,
+          name: l.name,
+          variant: l.variant,
+          productClientId: l.productClientId,
+          variantClientId: l.variantClientId,
         })),
       });
       if (!hasil.ok) {
@@ -498,11 +584,17 @@ export function StrukDrawer({
 
                     <ul className="space-y-1.5">
                       {form.lines.map((l, i) => (
-                        /* Key by id, not name — the same menu can appear twice
-                           in one receipt under different variants, and the
-                           name is editable, so a name-based key makes React
-                           reuse the wrong row's inputs mid-edit. */
-                        <li key={l.id} className="rounded-2xl border border-input bg-card p-2.5">
+                        /* Baris lama dikunci `id`-nya: menu yang sama bisa
+                           muncul dua kali dalam satu struk dengan varian
+                           berbeda, dan namanya bisa diedit, jadi key berbasis
+                           nama membuat React memakai ulang input baris yang
+                           salah. Baris BARU belum punya id — semuanya ber-id 0
+                           — jadi dikunci `baru-<urutan>`; urutannya tetap
+                           selama form ini terbuka. */
+                        <li
+                          key={l.baru ? `baru-${i}` : l.id}
+                          className="rounded-2xl border border-input bg-card p-2.5"
+                        >
                           <div className="flex items-baseline justify-between gap-2">
                             <span className="min-w-0 flex-1 truncate text-sm font-semibold">
                               {l.name}
@@ -563,6 +655,86 @@ export function StrukDrawer({
                         </li>
                       ))}
                     </ul>
+
+                    {/* Tambah item di dalam form, bukan di kaki drawer: yang
+                        ditambahkan ikut tersimpan bersama perubahan lain, dan
+                        batal = tidak jadi menambah. */}
+                    <div className="mt-2">
+                      {pilihBuka ? (
+                        <div className="rounded-2xl border border-input bg-card p-2.5">
+                          <input
+                            autoFocus
+                            aria-label="Cari menu untuk ditambah"
+                            value={cariMenu}
+                            onChange={(e) => setCariMenu(e.target.value)}
+                            placeholder="Cari menu…"
+                            className={
+                              "h-9 w-full rounded-lg border border-input bg-card px-2.5 text-sm " +
+                              "outline-none placeholder:text-muted-foreground focus:border-ring"
+                            }
+                          />
+                          {semuaOpsi.length === 0 ? (
+                            produkMemuat || !produkDimuat ? (
+                              <p className="px-1 py-2 text-xs text-muted-foreground">
+                                Memuat daftar menu…
+                              </p>
+                            ) : (
+                              <p className="px-1 py-2 text-xs text-muted-foreground">
+                                Daftar menu kosong. Muat ulang halaman, lalu coba lagi.
+                              </p>
+                            )
+                          ) : opsiTampil.length === 0 ? (
+                            <p className="px-1 py-2 text-xs text-muted-foreground">
+                              Tidak ada menu yang cocok dengan “{cariMenu}”.
+                            </p>
+                          ) : (
+                            <ul className="mt-1.5 max-h-56 divide-y divide-border overflow-y-auto">
+                              {opsiTampil.map((o) => (
+                                <li key={o.key}>
+                                  <button
+                                    type="button"
+                                    onClick={() => tambahItem(o)}
+                                    className="flex w-full items-baseline justify-between gap-3 px-1 py-2 text-left text-sm transition-colors hover:bg-accent"
+                                  >
+                                    <span className="min-w-0 flex-1 truncate">{o.label}</span>
+                                    <span className="shrink-0 text-xs font-semibold figure text-muted-foreground">
+                                      {o.custom ? "isi harga" : formatRupiah(o.price)}
+                                    </span>
+                                  </button>
+                                </li>
+                              ))}
+                            </ul>
+                          )}
+                          {opsiTotal > opsiTampil.length && (
+                            <p className="px-1 pt-1.5 text-[11px] text-muted-foreground">
+                              {opsiTotal - opsiTampil.length} menu lain disembunyikan — ketik
+                              untuk mempersempit.
+                            </p>
+                          )}
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setPilihBuka(false);
+                              setCariMenu("");
+                            }}
+                            className={btnGhost + " mt-2 w-full"}
+                          >
+                            Batal
+                          </button>
+                        </div>
+                      ) : (
+                        <button
+                          type="button"
+                          onClick={bukaPilihItem}
+                          className={
+                            "w-full rounded-2xl border border-dashed border-input py-2 text-xs font-semibold " +
+                            "text-muted-foreground transition-colors active:border-ring active:text-foreground"
+                          }
+                        >
+                          + Tambah item
+                        </button>
+                      )}
+                    </div>
                   </div>
 
                   {totalBaru !== totalLama && (

@@ -1,5 +1,6 @@
 import { headerRest, SUPABASE_URL } from "@/supabase/client";
 import { rapikanCatatan } from "./catatan-item";
+import { itemRow } from "./simpan-penjualan";
 import { jelaskanGalatTulis, type GalatTulis, galatValidasi } from "./galat-tulis";
 
 /** Sama seperti dipakai di seluruh lapisan data: angka null/undefined/NaN
@@ -88,11 +89,24 @@ async function patchStruk(id: number, body: Record<string, unknown>): Promise<Ha
    ------------------------------------------------------------------------- */
 
 export type BarisUbah = {
-  /** id baris `sale_items`. Wajib — tanpa ini baris tidak bisa ditulis. */
+  /** id baris `sale_items`. Wajib untuk baris yang sudah ada; baris baru
+   *  memakai 0 dan ditandai `baru: true`. */
   id: number;
   qty: number;
   price: number;
   note: string;
+  /** true = baris yang baru ditambahkan di form Ubah Data. Baris baru
+   *  di-INSERT ke `sale_items`, baris lama di-PATCH lewat `id`. Ditandai
+   *  eksplisit, bukan disimpulkan dari id 0: struk yang itemnya tidak punya
+   *  primary key (data contoh, fixture) juga ber-id 0 — dan menebaknya
+   *  sebagai baris baru berarti menulis ulang seluruh struknya. */
+  baru?: boolean;
+  /** Hanya dipakai baris baru: yang di-INSERT butuh nama. Baris lama cukup
+   *  id, karena PATCH tidak menyentuh nama. */
+  name?: string;
+  variant?: string;
+  productClientId?: string;
+  variantClientId?: string;
 };
 
 export type UbahStrukInput = {
@@ -118,33 +132,48 @@ export type HasilUbah = {
   dibuang?: number;
 };
 
-/** Baris yang qty-nya 0 dibuang: struk dengan baris nol akan tercetak sia-sia
- *  dan tercatat di KOT sebagai pesanan yang tidak ada. */
-export function bagiBarisUbah(
-  lines: BarisUbah[],
-): { disimpan: BarisUbah[]; dibuang: number } {
-  const disimpan = lines.filter((l) => Number(l.qty) > 0);
-  return { disimpan, dibuang: lines.length - disimpan.length };
+/** Pisahkan baris form jadi tiga: yang ditambah, yang diperbarui, dan yang
+ *  dibuang.
+ *
+ *  Baris qty 0 dibuang: struk dengan baris nol akan tercetak sia-sia dan
+ *  tercatat di KOT sebagai pesanan yang tidak ada. Aturan itu berlaku sama
+ *  untuk baris baru — item yang ditambahkan lalu qty-nya dinolkan tidak
+ *  pernah sampai ke database. */
+export function bagiBarisUbah(lines: BarisUbah[]): {
+  disimpan: BarisUbah[];
+  baru: BarisUbah[];
+  dibuang: number;
+} {
+  const hidup = lines.filter((l) => Number(l.qty) > 0);
+  const baru = hidup.filter((l) => l.baru === true);
+  const disimpan = hidup.filter((l) => l.baru !== true);
+  return { disimpan, baru, dibuang: lines.length - hidup.length };
 }
 
 export async function ubahStruk(input: UbahStrukInput): Promise<HasilUbah> {
-  const { disimpan, dibuang } = bagiBarisUbah(input.lines);
+  const { disimpan, baru, dibuang } = bagiBarisUbah(input.lines);
 
-  /* Baris tanpa id berarti form-nya dibangun dari sumber yang tidak punya
+  /* Baris lama tanpa id berarti form-nya dibangun dari sumber yang tidak punya
      primary key. Menjalankan PATCH dengan `id=eq.undefined` akan menimpa
-     baris acak, jadi berhenti di sini. */
+     baris acak, jadi berhenti di sini. Baris BARU tidak termasuk: yang
+     di-INSERT tidak butuh id — hanya butuh nama. */
   const tanpaId = disimpan.filter((l) => !Number.isFinite(l.id) || l.id <= 0);
   if (tanpaId.length > 0) {
     return { ok: false, pesan: "Ada baris item tanpa id — muat ulang struk lalu coba lagi." };
   }
-  if (disimpan.length === 0) {
+  const tanpaNama = baru.filter((l) => String(l.name ?? "").trim() === "");
+  if (tanpaNama.length > 0) {
+    return { ok: false, pesan: "Ada item baru tanpa nama — pilih menunya lagi." };
+  }
+  if (disimpan.length + baru.length === 0) {
     return {
       ok: false,
       pesan: "Semua item&qty 0. Struk tidak bisa disimpan kosong — batalkan struknya dari menu Penjualan.",
     };
   }
 
-  const subtotal = disimpan.reduce((a, l) => a + Math.max(0, n(l.price)) * Math.max(0, n(l.qty)), 0);
+  const ditulis = [...disimpan, ...baru];
+  const subtotal = ditulis.reduce((a, l) => a + Math.max(0, n(l.price)) * Math.max(0, n(l.qty)), 0);
   const total = Math.max(0, subtotal - Math.max(0, n(input.diskon)) + Math.max(0, n(input.ongkir)));
 
   /* Cek dulu total lama, supaya `statusBerubah` bisa dilaporkan dan PATCH
@@ -209,6 +238,41 @@ export async function ubahStruk(input: UbahStrukInput): Promise<HasilUbah> {
         note: rapikanCatatan(String(l.note ?? "")) ?? "",
       });
       if (!hasil.ok) return { ok: false, pesan: hasil.pesan };
+    }
+
+    /* 4. Item yang baru ditambahkan. Satu permintaan berisi semuanya:
+           PostgREST menerima array body, dan baris baru tidak punya id untuk
+           dirujuk satu per satu. Baris yang gagal disimpan bersamanya, jadi
+           tidak ada item yang setengah masuk. */
+    if (baru.length > 0) {
+      const isi = baru.map((l) =>
+        itemRow(input.saleId, {
+          productClientId: l.productClientId || "",
+          variantClientId: l.variantClientId || "",
+          menuName: l.name || "",
+          variantName: l.variant || "",
+          name: l.name || "",
+          price: Math.max(0, n(l.price)),
+          qty: Math.max(0, n(l.qty)),
+          note: rapikanCatatan(String(l.note ?? "")) ?? "",
+        }),
+      );
+      const tambah = await fetch(`${SUPABASE_URL}/rest/v1/sale_items`, {
+        method: "POST",
+        headers: {
+          ...headerRest(),
+          "Content-Type": "application/json",
+          Prefer: "return=representation",
+        },
+        body: JSON.stringify(isi),
+      });
+      if (!tambah.ok) {
+        return { ok: false, pesan: `Gagal menambah item struk (${tambah.status}).` };
+      }
+      const dibuat = (await tambah.json()) as unknown[];
+      if (!Array.isArray(dibuat) || dibuat.length !== isi.length) {
+        return { ok: false, pesan: "Item baru tidak tersimpan seluruhnya — periksa struk ini lagi." };
+      }
     }
   } catch (e) {
     return { ok: false, pesan: `Gagal menyimpan perubahan: ${(e as Error).message}` };

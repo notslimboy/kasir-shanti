@@ -108,7 +108,14 @@ export async function nomorAntreanBerikutnya(tanggal: Date): Promise<number> {
   return terbesar + 1;
 }
 
-function itemRow(saleId: number, it: BarisJual): Omit<SaleItemRow, "id"> {
+/** Bentuk satu baris `sale_items`.
+
+    Dipakai dua jalur tulis: `simpanPenjualan` (transaksi baru dari Kasir) dan
+    `ubahStruk` (item yang ditambahkan saat struk lama diedit). Satu tempat
+    supaya baris hasil edit tidak berbeda bentuk dengan baris hasil transaksi
+    baru — nama yang dicetak, `menu_name`, dan `variant_name` dihitung dengan
+    aturan yang sama. */
+export function itemRow(saleId: number, it: BarisJual): Omit<SaleItemRow, "id"> {
   const label = it.variantName && it.variantName.toLowerCase() !== "normal" ? ` (${it.variantName})` : "";
   return {
     sale_id: saleId,

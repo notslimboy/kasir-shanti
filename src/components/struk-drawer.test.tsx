@@ -6,6 +6,7 @@ import userEvent from "@testing-library/user-event";
 
 
 import type { Sale } from "@/lib/sale";
+import type { Product } from "@/lib/menu-seed";
 import type { HasilUbah, UbahStrukInput } from "@/lib/supabase-tulis";
 
 /* "Cetak Ulang" and "Ubah Data" in the receipt drawer.
@@ -360,5 +361,164 @@ describe("Ubah Data di drawer struk", () => {
     const data = JSON.parse((await screen.findByTestId("struk-data")).textContent ?? "{}");
     /* 99.000 + 10.000. The old total must not survive an edit. */
     expect(data.total).toBe(109_000);
+  });
+});
+
+/* -------------------------------------------------------------------------
+   Tambah Item
+
+   Struk lama tidak bisa dilengkapi: satu item yang tidak tercatat berarti
+   kasir harus membatalkan struk dan mengetik ulang seluruh orderan. Yang
+   diperiksa di sini adalah dua hal yang menentukan apakah tombolnya benar:
+   baris baru sungguh muncul di form, dan yang dikirim ke `onSimpan` ditandai
+   `baru` — tanpa tanda itu `ubahStruk` menolaknya sebagai baris tanpa id.
+   -------------------------------------------------------------------------- */
+
+const PRODUK: Product[] = [
+  {
+    client_id: "p-asem",
+    name: "Asem Asem Daging",
+    sku: "",
+    category: "Makanan",
+    aliases: [],
+    stock: 10,
+    stock_unlimited: false,
+    variants: [
+      {
+        client_id: "v-asem",
+        name: "Normal",
+        pricing_type: "fixed",
+        price: 25_000,
+        unit_name: "",
+        package_quantity: 1,
+        receipt_label: "",
+        is_default: true,
+        allow_quantity_override: true,
+        allow_price_override: false,
+        active: true,
+      },
+    ],
+  },
+];
+
+describe("Tambah item di form Ubah Data", () => {
+  beforeEach(() => {
+    simpanMock.mockReset();
+    simpanMock.mockResolvedValue({ ok: true, subtotal: 45_000, total: 45_000, dibuang: 0 });
+  });
+
+  it("membuka pemilih menu dan meminta katalognya", async () => {
+    /* Katalog Penjualan dimuat saat diminta: 1.095 produk tidak diambil untuk
+       struk yang cuma dilihat. */
+    const minta = vi.fn();
+    render(
+      <Drawer
+        sale={SALE_BERNOTE}
+        onClose={() => {}}
+        onSimpan={simpanMock}
+        produk={PRODUK}
+        onMintaProduk={minta}
+      />,
+    );
+    await masukModeEdit();
+
+    await userEvent.click(screen.getByRole("button", { name: /Tambah item/i }));
+    expect(minta).toHaveBeenCalled();
+    expect(screen.getByLabelText("Cari menu untuk ditambah")).toBeInTheDocument();
+  });
+
+  it("menambahkan baris ke form dan mengirimnya sebagai baris baru", async () => {
+    render(
+      <Drawer sale={SALE_BERNOTE} onClose={() => {}} onSimpan={simpanMock} produk={PRODUK} />,
+    );
+    await masukModeEdit();
+
+    await userEvent.click(screen.getByRole("button", { name: /Tambah item/i }));
+    await userEvent.click(screen.getByRole("button", { name: /Asem Asem Daging/ }));
+
+    /* Barisnya langsung terlihat, dengan harga variannya — bukan harga 0 yang
+       harus ditebak kasir. */
+    expect(screen.getByLabelText("Harga per porsi Asem Asem Daging")).toHaveValue("25.000");
+
+    await userEvent.click(screen.getByRole("button", { name: /^Simpan$/i }));
+    await waitFor(() => expect(simpanMock).toHaveBeenCalled());
+
+    const baru = simpanMock.mock.calls[0]![0].lines.filter((l) => l.baru);
+    expect(baru).toHaveLength(1);
+    expect(baru[0]).toMatchObject({
+      id: 0,
+      name: "Asem Asem Daging",
+      variant: "Normal",
+      price: 25_000,
+      qty: 1,
+      productClientId: "p-asem",
+      variantClientId: "v-asem",
+    });
+  });
+
+  it("baris lama tidak ikut ditandai baru", async () => {
+    render(
+      <Drawer sale={SALE_BERNOTE} onClose={() => {}} onSimpan={simpanMock} produk={PRODUK} />,
+    );
+    await masukModeEdit();
+    await userEvent.click(screen.getByRole("button", { name: /Tambah item/i }));
+    await userEvent.click(screen.getByRole("button", { name: /Asem Asem Daging/ }));
+    await userEvent.click(screen.getByRole("button", { name: /^Simpan$/i }));
+
+    await waitFor(() => expect(simpanMock).toHaveBeenCalled());
+    const lama = simpanMock.mock.calls[0]![0].lines.filter((l) => l.id === 101 || l.id === 102);
+    expect(lama.map((l) => l.baru)).toEqual([undefined, undefined]);
+  });
+
+  it("total ikut menghitung item yang baru ditambah", async () => {
+    render(
+      <Drawer sale={SALE_BERNOTE} onClose={() => {}} onSimpan={simpanMock} produk={PRODUK} />,
+    );
+    await masukModeEdit();
+    await userEvent.click(screen.getByRole("button", { name: /Tambah item/i }));
+    await userEvent.click(screen.getByRole("button", { name: /Asem Asem Daging/ }));
+
+    /* 45.000 + 25.000. Tanpa ini kasir bisa menambah item lalu menyimpan
+       dengan total lama, dan struknya tidak cocok dengan isinya. */
+    expect(screen.getByText(/Total berubah .*→ Rp 70\.000/)).toBeInTheDocument();
+  });
+
+  it("pencarian menyaring daftar menu", async () => {
+    render(
+      <Drawer sale={SALE_BERNOTE} onClose={() => {}} onSimpan={simpanMock} produk={PRODUK} />,
+    );
+    await masukModeEdit();
+    await userEvent.click(screen.getByRole("button", { name: /Tambah item/i }));
+    await userEvent.type(screen.getByLabelText("Cari menu untuk ditambah"), "soto");
+
+    expect(screen.queryByRole("button", { name: /Asem Asem Daging/ })).toBeNull();
+    expect(screen.getByText(/Tidak ada menu yang cocok/)).toBeInTheDocument();
+  });
+
+  it("menampilkan 'memuat' selama katalog belum datang, bukan 'tidak ada'", async () => {
+    /* Katalog kosong berarti belum dimuat — bukan berarti menu tidak ada.
+       Pesan yang salah membuat kasir mengira menunya sudah dihapus. */
+    render(<Drawer sale={SALE_BERNOTE} onClose={() => {}} onSimpan={simpanMock} produk={[]} />);
+    await masukModeEdit();
+    await userEvent.click(screen.getByRole("button", { name: /Tambah item/i }));
+
+    expect(screen.getByText(/Memuat daftar menu/)).toBeInTheDocument();
+  });
+
+  it("katalog yang sudah ditarik tapi kosong dilaporkan apa adanya", async () => {
+    render(
+      <Drawer
+        sale={SALE_BERNOTE}
+        onClose={() => {}}
+        onSimpan={simpanMock}
+        produk={[]}
+        produkDimuat
+      />,
+    );
+    await masukModeEdit();
+    await userEvent.click(screen.getByRole("button", { name: /Tambah item/i }));
+
+    expect(screen.queryByText(/Memuat daftar menu/)).toBeNull();
+    expect(screen.getByText(/Daftar menu kosong/)).toBeInTheDocument();
   });
 });

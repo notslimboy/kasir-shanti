@@ -39,6 +39,13 @@ beforeEach(() => {
         return json([{ id: 7, ...body }]);
       }
       if (method === "PATCH") return json([{ id: 1, ...body }]);
+      /* INSERT baris baru: PostgREST menerima array body, jadi jumlah baris
+         yang dikembalikan harus sama dengan yang dikirim — `ubahStruk`
+         memeriksa itu untuk memastikan tidak ada item yang setengah masuk. */
+      if (method === "POST") {
+        const isi = Array.isArray(body) ? body : [body];
+        return json(isi.map((b: Record<string, unknown>, i: number) => ({ id: 900 + i, ...b })));
+      }
       /* 204 tidak boleh punya body — `new Response("", {status: 204})`
          melempar di dalam Response constructor, bukan di server. */
       if (method === "DELETE") return new Response(null, { status: 204 });
@@ -216,6 +223,117 @@ describe("ubahStruk — baris item", () => {
     const idxPatchItems = urutan.findIndex((u) => u.startsWith("PATCH items"));
     expect(idxDelete).toBeGreaterThanOrEqual(0);
     expect(idxPatchItems).toBeGreaterThan(idxDelete);
+  });
+});
+
+describe("ubahStruk — menambah item", () => {
+  const BARU = {
+    id: 0,
+    baru: true,
+    name: "Asem Asem Daging",
+    variant: "Normal",
+    qty: 1,
+    price: 25_000,
+    note: "tanpa buncis",
+    productClientId: "p-asem",
+    variantClientId: "v-normal",
+  };
+
+  it("mengirim item baru lewat POST, bukan PATCH id 0", async () => {
+    /* PATCH `id=eq.0` akan menimpa baris acak. Item yang ditambahkan harus
+       INSERT, dan itu satu-satunya jalur yang boleh membuat baris baru. */
+    const hasil = await ubahStruk({
+      ...DASAR,
+      lines: [{ id: 101, qty: 1, price: 35_000, note: "" }, BARU],
+    });
+
+    expect(hasil.ok).toBe(true);
+    const post = panggil.find((p) => p.method === "POST" && p.url.includes("/sale_items"));
+    expect(post).toBeDefined();
+    const isi = post!.body as unknown as Record<string, unknown>[];
+    expect(Array.isArray(isi)).toBe(true);
+    expect(isi).toHaveLength(1);
+    expect(isi[0]).toMatchObject({
+      sale_id: 7,
+      name: "Asem Asem Daging",
+      menu_name: "Asem Asem Daging",
+      quantity: 1,
+      price: 25_000,
+      line_total: 25_000,
+      note: "tanpa buncis",
+      product_client_id: "p-asem",
+    });
+    /* Baris lama tidak ikut dikirim ulang. */
+    expect(panggil.some((p) => p.url.includes("in.(0)"))).toBe(false);
+  });
+
+  it("total ikut menghitung item baru", async () => {
+    const hasil = await ubahStruk({
+      ...DASAR,
+      lines: [{ id: 101, qty: 1, price: 35_000, note: "" }, BARU],
+    });
+    expect(hasil.subtotal).toBe(60_000);
+    expect(hasil.total).toBe(60_000);
+  });
+
+  it("item baru yang qty-nya dinolkan tidak pernah ikut dikirim", async () => {
+    const hasil = await ubahStruk({
+      ...DASAR,
+      lines: [{ id: 101, qty: 1, price: 35_000, note: "" }, { ...BARU, qty: 0 }],
+    });
+    expect(hasil.ok).toBe(true);
+    expect(hasil.dibuang).toBe(1);
+    expect(panggil.some((p) => p.method === "POST")).toBe(false);
+  });
+
+  it("menolak item baru tanpa nama", async () => {
+    const hasil = await ubahStruk({ ...DASAR, lines: [{ ...BARU, name: "  " }] });
+    expect(hasil.ok).toBe(false);
+    expect(hasil.pesan).toMatch(/tanpa nama/i);
+    expect(panggil.some((p) => p.method === "POST")).toBe(false);
+  });
+
+  it("melaporkan kalau server tidak menyimpan seluruh item baru", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url: string, init?: RequestInit) => {
+        const method = init?.method ?? "GET";
+        panggil.push({ url: String(url), method, body: init?.body ? JSON.parse(String(init.body)) : {} });
+        const json = (d: unknown) =>
+          new Response(JSON.stringify(d), { headers: { "Content-Type": "application/json" } });
+        if (method === "GET") return json(barisLama);
+        if (method === "POST") return json([]); // tidak ada yang tersimpan
+        if (method === "DELETE") return new Response(null, { status: 204 });
+        return json([{ id: 1 }]);
+      }),
+    );
+    const hasil = await ubahStruk({ ...DASAR, lines: [BARU] });
+    /* Struk yang totalnya sudah naik tapi itemnya tidak masuk adalah struk
+       yang tidak bisa dijelaskan ke pelanggan. */
+    expect(hasil.ok).toBe(false);
+    expect(hasil.pesan).toMatch(/tidak tersimpan seluruhnya/i);
+  });
+
+  it("tetap menolak baris lama tanpa id", async () => {
+    /* `baru` sengaja ditandai eksplisit: baris hasil baca yang tidak punya
+       primary key juga ber-id 0, dan menebaknya sebagai baris baru berarti
+       menulis ulang seluruh struknya. */
+    const hasil = await ubahStruk({ ...DASAR, lines: [{ id: 0, qty: 1, price: 1_000, note: "" }] });
+    expect(hasil.ok).toBe(false);
+    expect(hasil.pesan).toMatch(/tanpa id/i);
+  });
+});
+
+describe("bagiBarisUbah", () => {
+  it("memisahkan item baru dari item yang sudah ada", () => {
+    const { baru, disimpan, dibuang } = bagiBarisUbah([
+      { id: 11, qty: 1, price: 1_000, note: "" },
+      { id: 0, baru: true, qty: 2, price: 2_000, note: "" },
+      { id: 12, qty: 0, price: 3_000, note: "" },
+    ]);
+    expect(baru.map((l) => l.id)).toEqual([0]);
+    expect(disimpan.map((l) => l.id)).toEqual([11]);
+    expect(dibuang).toBe(1);
   });
 });
 

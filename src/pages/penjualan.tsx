@@ -1049,6 +1049,13 @@ export function PenjualanPage() {
         onRestore={(s) => void jalankan(s, "restore")}
         onHapusPermanen={(s) => setKonfirmasiPermanen(s)}
         onSimpan={simpanUbah}
+        /* Katalog menu dimuat saat diminta, bukan saat halaman dibuka:
+           Penjualan tidak butuh 1.095 produk untuk menampilkan tabel struk,
+           dan menunggu katalognya berarti menunggu tanpa alasan. */
+        produk={data.produk}
+        onMintaProduk={() => data.pastikanProduk()}
+        produkDimuat={data.produkDimuat}
+        produkMemuat={data.produkMemuat}
         sedangProses={strukAktif !== null && sedangProses === strukAktif.id}
       />
 
