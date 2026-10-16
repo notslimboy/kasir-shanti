@@ -513,9 +513,44 @@ export function PenjualanPage() {
           /* Action TIDAK dilebar penuh di bawah sm. PageHeader memakai
              justify-between, jadi blok action tetap duduk di kiri dan
              ikut isinya — tombol selebar layar hanya terlihat seperti
-             banner, bukan kendali. Keduanya tetap h-11 supaya target
-             sentuhnya tidak mengecil. */
+             banner, bukan kendali.
+
+             Tingginya campur dengan sengaja: "Export CSV" satu-satunya
+             tombol berteks dan tingginya h-11, sedangkan dua tombol ikon
+             memakai h-10 bawaan `IconButton` — bentuk yang sama dengan
+             tombol ikon di header halaman lain. Yang dijaga bukan
+             keseragaman tinggi, melainkan target sentuh yang tidak
+             mengecil di layar sempit: di 390px ketiganya masih
+             berdampingan (44 + 110 + 44 + jarak = 214px). */
           <div className="flex items-center gap-2">
+            {/* Muat ulang data. Sebelumnya satu-satunya cara menyegarkan
+                halaman ini adalah me-refresh browser — padahal struk dari
+                perangkat lain (kasir kedua) hanya muncul setelah data ditarik
+                ulang, dan halaman ini yang paling lama dibiarkan terbuka.
+
+                Ikonnya sama dengan tombol tarik produk di halaman Menu, dan
+                ikut berputar saat memuat: hasil muat ulang tidak punya teks,
+                jadi putaran itu satu-satunya tanda tombolnya bekerja. */}
+            <IconButton
+              onClick={() => void data.muatUlang()}
+              disabled={data.status === "memuat"}
+              label={data.status === "memuat" ? "Memuat ulang data" : "Muat ulang data"}
+              title={
+                data.status === "memuat"
+                  ? "Sedang menarik data dari server"
+                  : "Muat ulang dari server — struk dari perangkat lain ikut masuk"
+              }
+            >
+              <svg
+                viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.75}
+                strokeLinecap="round" strokeLinejoin="round"
+                className={`h-[18px] w-[18px] ${data.status === "memuat" ? "animate-spin" : ""}`}
+                aria-hidden="true"
+              >
+                <path d="M21 12a9 9 0 1 1-3.5-7.1" />
+                <path d="M21 4v5h-5" />
+              </svg>
+            </IconButton>
             <button
               onClick={exportCsvSekarang}
               disabled={jumlahExport === 0}

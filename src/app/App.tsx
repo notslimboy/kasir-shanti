@@ -198,17 +198,20 @@ function AppShell() {
       <header className="sticky top-0 z-30 flex h-16 shrink-0 items-center gap-3 border-b border-border bg-background/90 px-4 backdrop-blur lg:px-7">
         <button
           aria-label="Buka menu" onClick={() => setDrawer(true)}
-          className="grid h-10 w-10 place-items-center rounded-full border border-border bg-card text-foreground lg:hidden"
+          /* `shrink-0` bukan hiasan: tanpa itu flex menggencet tombol ini jadi
+             elips saat barisnya sesak (brand + tombol kanan tidak boleh
+             mengecil), dan lingkarannya terlihat gepeng. */
+          className="grid h-10 w-10 shrink-0 place-items-center rounded-full border border-border bg-card text-foreground lg:hidden"
         >
           {IcoMenu}
         </button>
 
         <button
           onClick={() => go("dashboard")}
-          className="shrink-0 rounded-2xl px-2 py-1.5 hover:bg-muted"
+          /* Nama brand hanya di desktop. Di mobile tempatnya sudah dipakai
+             tombol kanan, dan brand sudah diwakili logo di dalam drawer. */
+          className="hidden shrink-0 rounded-2xl px-2 py-1.5 hover:bg-muted lg:block"
         >
-          {/* Di mobile nama brand tidak boleh wrap: topbar jadi dua baris
-              dan tombol di sebelahnya tergeser. */}
           <span className="whitespace-nowrap text-base font-bold tracking-[-0.02em] lg:text-lg">
             Shanti Catering
           </span>

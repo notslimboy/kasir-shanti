@@ -111,6 +111,11 @@ The reference is **very rounded** — that is its signature, do not shrink it.
 - Left: name + chevron (workspace dropdown)
 - Middle: search pill, white bg, pill radius
 - Right: icon button + primary action `+ Tambah` (lime bg, `#092C1B` text)
+- **Mobile (below `lg`):** the brand name is dropped. The round menu button
+  stands alone on the left; the brand is carried by the logo inside the drawer,
+  which taps back to Beranda. On a 320–390px row that button must stay
+  `shrink-0` — it is the only shrinkable child, so without it flex squeezes the
+  circle into a 22×40px oval.
 
 ### KPI card
 ```
@@ -148,6 +153,9 @@ The reference is **very rounded** — that is its signature, do not shrink it.
 - Columns: # · Order ID · Product (+thumbnail) · Date · Price · Status · Actions
 - **Price right-aligned, tabular**
 - Status pill: `Lunas` mint bg, dark green text · `Belum lunas` amber bg, amber-ink text
+- A pill never wraps its label. When the row runs out of room the whole pill
+  moves to the next line (the row owns `flex-wrap`), so pill heights in one row
+  stay equal.
 - Actions: round icon buttons, hover bg lime 12%
 
 ---

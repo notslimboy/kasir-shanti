@@ -11,6 +11,7 @@ import {
 import { KpiCard } from "@/components/kpi-card";
 import { useData } from "@/lib/data-source";
 import { Card, CardTitle, Pill } from "@/components/ui/card";
+import { TeksPotong } from "@/components/ui/tooltip";
 import { ChartBox } from "@/components/chart-box";
 import { ChartDonut } from "@/components/chart-donut";
 import { CHART_ANIM } from "@/components/chart-motion";
@@ -114,18 +115,23 @@ export function Beranda() {
             <Card
               fillBody
               className="min-h-[300px] sm:min-h-[360px]"
-              title={<CardTitle hint>Tren {hariTren} hari terakhir</CardTitle>}
+              title={<CardTitle className="text-sm sm:text-base">Tren {hariTren} hari</CardTitle>}
               action={
                 /* Tombol yang tidak melakukan apa-apa lebih buruk daripada
-                   tidak ada tombolnya, jadi ini pengatur rentang sungguhan. */
-                <div className="flex shrink-0 items-center gap-1 rounded-full border border-border p-0.5">
+                   tidak ada tombolnya, jadi ini pengatur rentang sungguhan.
+
+                   Ukurannya mengecil di bawah `sm`: dengan ukuran desktop,
+                   "Tren 30 hari" + tiga tombol tidak muat sebaris di 390px
+                   dan tombolnya turun ke baris kedua — justru di layar yang
+                   paling sering dipakai. */
+                <div className="flex shrink-0 items-center gap-0.5 rounded-full border border-border p-0.5 sm:gap-1">
                   {HARI_TREN.map((h) => (
                     <button
                       key={h}
                       onClick={() => setHariTren(h)}
                       aria-pressed={hariTren === h}
                       className={
-                        "h-8 rounded-full px-2.5 text-xs font-semibold transition-colors " +
+                        "h-7 rounded-full px-2 text-[11px] font-semibold transition-colors sm:h-8 sm:px-2.5 sm:text-xs " +
                         (hariTren === h
                           ? "bg-primary text-primary-foreground"
                           : "text-muted-foreground hover:text-foreground")
@@ -304,27 +310,41 @@ export function Beranda() {
             {/* Kartu struk untuk layar < lg. Barisnya tidak bisa diketuk
                 di halaman ini (Struk Terbaru memang read-only), jadi
                 tanpa role="button" — harus terbaca sebagai daftar,
-                bukan tombol yang tidak melakukan apa pun. */}
+                bukan tombol yang tidak melakukan apa pun.
+
+                Susunannya mengikuti kartu struk di halaman Struk: nama
+                dulu, total di kanan, nomor struk di baris kedua. Nomor
+                yang diratakan ke kanan di sebelah total terbaca sebagai
+                milik total itu, dan tidak jelas mana yang utama.
+
+                Waktu memakai bentuk ringkas (`completedAtShort`): bentuk
+                panjang "16 Oktober 2026, 09:49" berdampingan dengan dua
+                pill membuat tiap pill tertekan sampai pecah dua baris di
+                320px. */}
             <ul className="space-y-2 lg:hidden">
               {strukTerbaru.map((s) => (
                 <li key={s.receiptNo} className="rounded-2xl border border-border bg-card p-3">
                   <div className="flex items-baseline justify-between gap-3">
-                    <span className="min-w-0 flex-1 truncate text-right text-sm font-semibold figure">
-                      {s.receiptNo}
+                    <span className="min-w-0 flex-1 text-sm font-semibold">
+                      <TeksPotong teks={s.customer} />
                     </span>
                     <span className="shrink-0 text-base font-bold figure">
                       {rupiah(s.total)}
                     </span>
                   </div>
-                  <div className="mt-1 truncate text-sm">{s.customer}</div>
-                  <div className="mt-2 flex items-center gap-2">
-                    <span className="shrink-0 text-xs text-muted-foreground figure">
-                      {s.completedAt}
+                  <div className="mt-1 truncate text-xs text-muted-foreground figure">
+                    {s.receiptNo}
+                  </div>
+                  <div className="mt-2 flex flex-wrap items-center gap-x-2 gap-y-1">
+                    <span className="text-xs text-muted-foreground figure">
+                      {s.completedAtShort}
                     </span>
                     <Pill>{s.payment}</Pill>
-                    {s.status === "lunas" && <Pill tone="success">Lunas</Pill>}
-                    {s.status === "belum" && <Pill tone="warning">Belum Lunas</Pill>}
-                    {s.status === "terhapus" && <Pill tone="danger">Terhapus</Pill>}
+                    <span className="ml-auto">
+                      {s.status === "lunas" && <Pill tone="success">Lunas</Pill>}
+                      {s.status === "belum" && <Pill tone="warning">Belum Lunas</Pill>}
+                      {s.status === "terhapus" && <Pill tone="danger">Terhapus</Pill>}
+                    </span>
                   </div>
                 </li>
               ))}

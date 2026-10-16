@@ -315,4 +315,120 @@ test.describe("mobile", () => {
       `waktu "${waktuRingkas.teks}" terpotong — tanggal tidak terbaca`,
     ).toBe(false);
   });
+
+  /* Topbar mobile.
+
+     Nama brand di topbar mobile dihapus: tempatnya dipakai tombol kanan
+     (tema + Transaksi Baru) dan di 320px barisnya sudah kehabisan ruang.
+     Yang tersisa di kiri hanya tombol menu — dan tombol itu harus bulat.
+     Flex mengecilkannya jadi 22x40 (elips) selama brand masih ada di
+     baris yang sama dan tombol kanan tidak boleh mengecil. */
+  test("topbar mobile: tanpa nama brand, tombol menu tetap bulat", async ({ page }) => {
+    await page.setViewportSize({ width: 320, height: 900 });
+    await page.goto("/");
+
+    await expect(
+      page.locator("header").getByText("Shanti Catering"),
+      "nama brand masih tampil di topbar mobile — barisnya kembali kehabisan ruang",
+    ).toBeHidden();
+
+    const menu = await page.getByRole("button", { name: "Buka menu" }).evaluate((el) => {
+      const r = el.getBoundingClientRect();
+      return { w: r.width, h: r.height, right: r.right };
+    });
+    expect(
+      Math.abs(menu.w - menu.h),
+      `tombol menu ${menu.w}x${menu.h} — gepeng, bukan lingkaran`,
+    ).toBeLessThanOrEqual(1);
+    expect(menu.w, "tombol menu lebih kecil dari 40px — sasaran sentuh sempit").toBeGreaterThanOrEqual(40);
+    expect(menu.right, "tombol menu melewati tepi layar").toBeLessThanOrEqual(320);
+  });
+
+  /* Pengatur rentang tren sempat turun ke baris kedua di semua lebar
+     di bawah 414px: judul desktop + tiga tombol ukuran desktop tidak
+     muat sebaris, dan tombolnya pindah baris — persis di layar yang
+     paling sering dipakai. */
+  test("tombol rentang tren sebaris dengan judulnya di 390px", async ({ page }) => {
+    await page.setViewportSize({ width: 390, height: 900 });
+    await pakaiSupabasePalsu(page, { sales: [SALE_FIXTURE] });
+    await page.goto("/");
+    await page.waitForLoadState("networkidle");
+
+    /* `getByRole` dengan pola nama, bukan selector CSS longgar: kalau
+       judulnya berubah, test ini gagal, bukan diam-diam mengukur elemen
+       lain. */
+    const judul = page.getByRole("heading", { name: /^Tren / });
+    await expect(judul).toBeVisible();
+
+    /* Induk judul = baris header kartu, tempat tombol rentangnya berada. */
+    const baris = judul.locator("..");
+    const tombol = baris.getByRole("button").first();
+    await expect(tombol).toBeVisible();
+
+    const pusat = async (l: typeof judul) => {
+      const r = await l.boundingBox();
+      if (!r) throw new Error("elemen tidak punya kotak");
+      return r.y + r.height / 2;
+    };
+    expect(
+      Math.abs((await pusat(judul)) - (await pusat(tombol))),
+      "tombol rentang turun ke baris kedua, tidak sebaris dengan judulnya",
+    ).toBeLessThan(4);
+
+    /* Tanda tanya dekoratif (bukan tombol, tidak melakukan apa-apa) tidak
+       lagi dipasang di judul ini. */
+    await expect(baris.getByText("?", { exact: true })).toHaveCount(0);
+  });
+
+  /* Logo di drawer merangkap jalan pulang ke Beranda — di mobile nama
+     brand sudah tidak ada di topbar, jadi tidak ada jalan lain selain
+     ikon Dashboard di daftar bawah. */
+  test("logo di drawer kembali ke Beranda", async ({ page }) => {
+    await page.goto("/penjualan");
+    await page.getByRole("button", { name: "Buka menu" }).click();
+
+    /* Dua Sidebar ada di DOM (rail desktop + drawer) dan rail desktopnya
+       disembunyikan CSS, jadi tombolnya dua. */
+    await page.getByRole("button", { name: "Ke Beranda" }).last().click();
+
+    await expect(page).toHaveURL(/\/$/);
+    await expect(page.getByRole("button", { name: "Tutup menu" })).toBeHidden();
+    await expect(page.getByRole("heading", { name: "Dashboard Penjualan" })).toBeVisible();
+  });
+
+  /* Kartu struk di Beranda dulu memakai bentuk waktu panjang
+     ("16 Oktober 2026, 09:49") berdampingan dengan dua pill di baris
+     320px. Tiap pill tertekan sampai labelnya pecah dua baris, dan
+     tanggalnya bergerigi. Sekarang bentuknya sebaris dengan kartu di
+     halaman Struk: nama, total, nomor, lalu waktu ringkas + pill. */
+  test("kartu struk Beranda tidak meluber dan pill-nya utuh di 320px", async ({ page }) => {
+    await page.setViewportSize({ width: 320, height: 900 });
+    /* `paid_amount: 0` = "Belum Lunas", label terpanjang: kalau ada pil
+       yang pecah, pil inilah yang pecah. */
+    await pakaiSupabasePalsu(page, { sales: [{ ...SALE_FIXTURE, paid_amount: 0 }] });
+    await page.goto("/");
+    await page.waitForLoadState("networkidle");
+
+    const kartu = page.locator("ul.lg\\:hidden li").first();
+    await expect(kartu, "kartu struk tidak muncul di Beranda").toBeVisible();
+
+    const { kanan, tampilan } = await kartu.evaluate((el) => ({
+      kanan: el.getBoundingClientRect().right,
+      tampilan: [...el.querySelectorAll("span")]
+        /* Daun saja: pembungkus pill juga membawa teks yang sama dan
+           tingginya selalu lebih tinggi dari pill-nya. */
+        .filter((a) => a.childElementCount === 0)
+        .map((a) => {
+          const r = a.getBoundingClientRect();
+          return { teks: (a.textContent ?? "").trim(), tinggi: Math.round(r.height) };
+        }),
+    }));
+    expect(kanan, "kartu struk Beranda meluber keluar layar").toBeLessThanOrEqual(321);
+
+    const pillPecah = tampilan.filter((a) => a.teks === "Belum Lunas" && a.tinggi > 22);
+    expect(
+      pillPecah,
+      "pill 'Belum Lunas' pecah dua baris — tinggi baris jadi bergerigi",
+    ).toHaveLength(0);
+  });
 });

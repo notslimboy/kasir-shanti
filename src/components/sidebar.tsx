@@ -109,7 +109,11 @@ export function Sidebar({
       )}
       aria-label="Navigasi utama"
     >
-      {/* Logo.
+      {/* Logo — merangkap tombol ke Beranda.
+
+          Di mobile nama brand di topbar sudah dihapus, jadi logo inilah satu-
+          satunya jalan pulang ke dashboard selain ikon di daftar bawah. Karena
+          itu ia tombol, bukan gambar mati: yang mencarinya akan menekannya.
 
           Memakai logo brand Shanti (public/favicon.png) yang sudah ada di
           aset, bukan placeholder huruf "K" lagi.
@@ -122,11 +126,19 @@ export function Sidebar({
           `/favicon.png` (bukan `/icon.png`) karena file itu satu-satunya
           logo brand yang sudah berada di `public/`, jadi tidak perlu
           menyalin aset 59KB ke repo dan tetap ikut terbawa saat build. */}
-      <img
-        src="/favicon.png"
-        alt="Shanti Catering"
-        className="mb-5 h-10 w-10 shrink-0 rounded-full object-cover"
-      />
+      <button
+        type="button"
+        onClick={() => onSelect?.("dashboard")}
+        aria-label="Ke Beranda"
+        title="Beranda"
+        className="mb-5 h-10 w-10 shrink-0 rounded-full transition-transform hover:scale-105 active:scale-95"
+      >
+        <img
+          src="/favicon.png"
+          alt="Shanti Catering"
+          className="h-10 w-10 rounded-full object-cover"
+        />
+      </button>
 
       {/* Wrapper daftar: satu-satunya bagian yang scroll.
 

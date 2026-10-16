@@ -52,19 +52,39 @@ export function Card({
   );
 }
 
-export function CardTitle({ children, hint }: { children: React.ReactNode; hint?: boolean }) {
+/** Judul kartu.
+
+    Elemen heading-nya milik `Card` (pembungkus `<h2>`), jadi di sini cukup
+    `<span>`: `<h2>` di dalam `<h2>` membuat satu judul dibaca dua kali oleh
+    pembaca layar. `className` untuk menyesuaikan ukuran huruf per layar —
+    judul yang harus sebasis dengan tombol di sebelahnya tidak boleh pecah
+    jadi dua baris hanya karena ukuran huruf desktop. */
+export function CardTitle({
+  children,
+  hint,
+  className,
+}: {
+  children: React.ReactNode;
+  hint?: boolean;
+  className?: string;
+}) {
   return (
-    <div className="flex items-center gap-2">
-      <h2 className="text-base font-semibold tracking-[-0.01em]">{children}</h2>
+    <span className={cn("flex items-center gap-2", className)}>
+      <span>{children}</span>
       {hint && (
-        <span className="grid h-4 w-4 place-items-center rounded-full bg-muted text-[10px] font-bold text-muted-foreground">
+        <span className="grid h-4 w-4 shrink-0 place-items-center rounded-full bg-muted text-[10px] font-bold text-muted-foreground">
           ?
         </span>
       )}
-    </div>
+    </span>
   );
 }
 
+/** Label status pendek. `whitespace-nowrap` wajib: di baris yang sempit label
+    dua kata ("Belum Lunas") pecah jadi dua baris di dalam pill, tingginya
+    melebihi tetangganya, dan deretan pill jadi bergerigi. Kalau ruangnya
+    habis, yang boleh pindah baris adalah SELURUH pill — induknya yang
+    `flex-wrap` — bukan tulisannya. */
 export function Pill({
   children,
   tone = "neutral",
@@ -81,7 +101,7 @@ export function Pill({
     danger: "bg-destructive/12 text-destructive",
   }[tone];
   return (
-    <span className={cn("inline-flex rounded-full px-2.5 py-0.5 text-xs font-semibold", tones, className)}>
+    <span className={cn("inline-flex whitespace-nowrap rounded-full px-2.5 py-0.5 text-xs font-semibold", tones, className)}>
       {children}
     </span>
   );
