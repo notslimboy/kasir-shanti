@@ -155,6 +155,18 @@ describe("isi struk", () => {
     expect(r.tersimpan).toBe(1);
     expect(r.struk).toHaveLength(1);
   });
+
+  it("struk hasil impor lahir belum lunas, sama seperti Kasir", async () => {
+    /* Dua jalur tulis harus sepakat. Kalau impor menulis `paid_amount: total`
+       sementara Kasir menulis 0, status awal sebuah struk bergantung pada
+       dari mana ia dibuat — dan piutang hasil impor hilang tanpa jejak. */
+    Pasang();
+    await simpanPesananImpor([pesanan({ total: 120_000 })]);
+
+    const kirim = sales()[0].body;
+    expect(kirim.paid_amount).toBe(0);
+    expect(kirim.total).toBe(120_000);
+  });
 });
 
 describe("pelaporan proses", () => {

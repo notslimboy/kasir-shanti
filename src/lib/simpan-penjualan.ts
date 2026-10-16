@@ -250,7 +250,13 @@ export async function simpanPenjualan(payload: PayloadJual): Promise<HasilJual> 
     chat_date: tanggal,
     deleted_at: null,
     stock_restored_on_delete: 0,
-    paid_amount: total,
+    /* Struk baru lahir BELUM LUNAS. Sengaja tidak meniru versi lama yang
+       menulis `paid_amount: total` di sini: pelunasan dicatat di halaman
+       Piutang, dan struk yang lahir sudah "Lunas" membuat piutang kemarin
+       lenyap begitu struk hari ini dibuat — tidak ada lagi yang tahu mana
+       yang benar-benar sudah dibayar. Mengubah ini berarti mengubah arti
+       angka di seluruh laporan, jadi jangan "diperbaiki" balik. */
+    paid_amount: 0,
     created_at: completedAt.toISOString(),
     queue_no: queueNo,
     queue_date: tanggal,

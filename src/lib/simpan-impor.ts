@@ -182,7 +182,11 @@ export async function simpanPesananImpor(
       chat_date: p.tanggal,
       deleted_at: null,
       stock_restored_on_delete: 0,
-      paid_amount: p.total,
+      /* Sama seperti Kasir: struk hasil impor lahir BELUM LUNAS, dan
+         pelunasannya dicatat di halaman Piutang. Lihat catatan panjang di
+         `simpan-penjualan.ts` — dua jalur tulis ini harus sepakat, kalau
+         tidak, status awal struk bergantung pada dari mana ia dibuat. */
+      paid_amount: 0,
       created_at: prosesIso,
       queue_no: queueNo,
       queue_date: tanggal,

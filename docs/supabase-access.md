@@ -112,13 +112,20 @@ shared devices.
 
 ## Scripts that talk to Supabase directly
 
-`update_customers_csv.py` and `scripts/tag_customer_supabase.py` run in a
-terminal, not in a browser, so they cannot use a signed-in session and the
-publishable key no longer works. They read the service-role key from the
-environment:
+`update_customers_csv.py`, `scripts/tag_customer_supabase.py` and
+`scripts/tandai_belum_lunas.py` run in a terminal, not in a browser, so they
+cannot use a signed-in session and the publishable key no longer works. They
+read the service-role key from the environment:
 
 ```bash
 export SUPABASE_KEY='sb_secret_...'   # Dashboard → Project Settings → API Keys
+```
+
+`scripts/tandai_belum_lunas.py` also reads the same variable from `.env.local`
+or `.env` (both gitignored), which keeps the key out of shell history:
+
+```bash
+SUPABASE_KEY=sb_secret_...            # in .env.local
 ```
 
 The service-role key bypasses RLS entirely. Keep it in `.env` (gitignored),
@@ -126,6 +133,17 @@ never in a committed file, and rotate it if it ever leaks.
 
 Without the variable both scripts now stop with an explanation instead of
 failing obscurely, and neither will write an empty file over `customers.csv`.
+
+`scripts/tandai_belum_lunas.py` writes, but only when asked. It is the bulk
+form of the Piutang page's "Belum lunas" action — it corrects the customer
+deposit, deletes the `sale_payments` rows and recomputes `paid_amount` from
+what is left. Run it without `--tulis` first; the dry run reports the same
+counts it would write.
+
+```bash
+python3 scripts/tandai_belum_lunas.py --dari 2026-08-01          # dry run
+python3 scripts/tandai_belum_lunas.py --dari 2026-08-01 --tulis  # writes
+```
 
 ## Env vars in the app build
 

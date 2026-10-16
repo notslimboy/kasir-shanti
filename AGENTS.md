@@ -303,6 +303,10 @@ legacy/             old stack documentation — does not describe this repo
 - CSV import and order grouping follow the old Bulk Input
   (`groupKey = customer|chatDate|payment|shipping`). Do not change the 9-column
   format.
+- Every new struk — from Kasir and from Import Pesanan alike — is written with
+  `paid_amount = 0`, so it starts as **Belum Lunas**. Payment is recorded from
+  the Piutang page. Status is derived (`paid_amount >= total`), so writing the
+  total at creation silently erases the debt; do not restore that.
 - Visual tokens and rules live in `DESIGN.md`. Values are sampled from pixels in
   `design/reference.png`, never guessed.
 - Never commit `customers.csv`, `Chat*.txt`, `orderan/`, or
