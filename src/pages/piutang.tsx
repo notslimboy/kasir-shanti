@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { motion, useReducedMotion } from "motion/react";
 
 import { useData } from "@/lib/data-source";
-import { kurirDariTag, petaTag, TAG_TANPA_PEMETAAN } from "@/lib/kurir";
+import { kurirDariTag, TAG_TANPA_PEMETAAN } from "@/lib/kurir";
 import { rupiah, rupiahShort } from "@/lib/format";
 import { Card, Pill } from "@/components/ui/card";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -139,10 +139,9 @@ export function PiutangPage() {
   const sentinelRef = useRef<HTMLDivElement | null>(null);
   const kurangiGerak = useReducedMotion();
 
-  const tagUntukNama = useMemo(
-    () => petaTag(data.customers.map((c) => ({ name: c.name, tag: c.tag }))),
-    [data.customers],
-  );
+  /* Tag area per nama struk datang dari data layer — sama persis dengan
+     yang dipakai Penjualan dan Beranda. */
+  const { tagUntukNama } = data;
 
   /* Struk terhapus TIDAK pernah jadi piutang — sama seperti versi lama.
      `deleted_at` berarti struk di-void, bukan tagihan yang belum dibayar. */

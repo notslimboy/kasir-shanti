@@ -146,6 +146,39 @@ test.describe("mobile", () => {
     }
   });
 
+  /* Nama di struk sering cuma dikenal sebagai alias: pelanggan "Anis BTH"
+     pernah tertulis "Anish BTH". Alias itu tidak memuat kata area apa pun,
+     jadi satu-satunya jalan tag-nya ketemu adalah dengan mengenali alias
+     sebagai nama pelanggan yang sama. */
+  test("struk yang namanya cuma alias pelanggan tetap dapat tag", async ({ page }) => {
+    const struk = {
+      ...SALE_FIXTURE,
+      id: 4,
+      receipt_no: "SH-20261006-0020",
+      customer_name: "Anish BTH",
+    };
+    await pakaiSupabasePalsu(page, {
+      sales: [struk],
+      customers: CUSTOMER_TAG_DI_ALIAS,
+      /* Dua alias untuk "Anis BTH": satu dari data nyata, satu tanpa kata
+         area sama sekali — yang terakhir ini yang dulu tampil kosong. */
+      customer_aliases: [
+        ...ALIAS_TAG_DI_ALIAS,
+        { customer_id: 126, alias: "Anish BTH" },
+      ],
+    });
+    await page.setViewportSize({ width: 1280, height: 900 });
+    await page.goto("/penjualan");
+    await page.waitForLoadState("networkidle");
+
+    const baris = page.locator("tbody tr").filter({ hasText: struk.receipt_no }).first();
+    await expect(baris, "struk dengan nama alias tidak muncul di tabel").toBeVisible();
+    await expect(
+      baris,
+      `"${struk.customer_name}" tampil tanpa area — namanya hanya dikenal sebagai alias pelanggan "Anis BTH", dan alias itu harus dicocokkan juga`,
+    ).toContainText("ITS");
+  });
+
   /* Tag ikut dicari karena area = satu kurir. Kasir lebih sering
      bertanya "semua kiriman Sutorejo" daripada menyebut nama per struk,
      dan tanpa ini dia harus membaca satu per satu baris untuk

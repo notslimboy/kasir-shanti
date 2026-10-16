@@ -14,6 +14,7 @@ import {
   type DataProduk,
 } from "@/lib/live";
 import { cacheBaca, cacheHapus, cacheHapusAwalan, cacheTulis } from "@/lib/cache-db";
+import { petaTag } from "@/lib/kurir";
 import type { Sale } from "@/lib/sale";
 import type { Customer } from "@/lib/page-data";
 import type { Product as MenuProduct } from "@/lib/menu-seed";
@@ -50,6 +51,13 @@ type Toko = {
       → "Bhaskara sari 38"). Dipakai untuk mencari di dropdown keranjang;
       yang TERSIMPAN ke struk tetap nama asli dari `customers`. */
   customerAlias: AliasCustomer[];
+  /** Tag area per nama yang tertulis di struk — menerima nama customer,
+      aliasnya, atau ejaan bebas kasir ("Anish BTH"). Satu peta untuk
+      seluruh aplikasi: dulu Penjualan, Beranda, dan Piutang masing-masing
+      memanggil `petaTag` sendiri, dan hanya Penjualan yang memberi daftar
+      alias — tiga halaman bisa menampilkan area yang berbeda dari data
+      yang sama. */
+  tagUntukNama: (nama: string) => string;
   /** True setelah produk & varian benar-benar terambil. */
   produkSiap: boolean;
   /** True kalau katalog SUDAH ditarik — sudah ditarik dengan 0 hasil atau belum?
@@ -122,6 +130,9 @@ const KOSONG = {
   salesMentah: [] as SaleRow[],
   salesSemua: [] as SaleRow[],
   ringkasStruk: [] as Sale[],
+  /* Belum ada data = belum ada tag. Mengembalikan peta kosong lebih jujur
+     daripada menebak dari nama yang kebetulan dikirim. */
+  tagUntukNama: () => "",
 };
 
 /* Cache lokal memakai IndexedDB (lihat lib/cache-db.ts). Katalog 1.099 +
@@ -601,6 +612,27 @@ export function DataProvider({
     return padaProdukStale(() => pastikanProduk());
   }, [pastikanProduk]);
 
+  /* Pelanggan untuk UI dihitung sekali di sini, bukan di dalam `nilai`:
+     peta tag di bawahnya dibangun dari daftar yang sama dengan yang dibaca
+     halaman — id-nya harus bentuk "c123" supaya bisa dicocokkan ke baris
+     alias. */
+  const customers = useMemo(
+    () => (inti ? customerUntukUI(inti.customers, inti.sales) : []),
+    [inti],
+  );
+
+  /* Tag area per nama yang tertulis di struk. Satu peta untuk seluruh
+     aplikasi: dulu Penjualan, Beranda, dan Piutang masing-masing memanggil
+     `petaTag`, dan hanya Penjualan yang menyertakan alias customer. */
+  const tagUntukNama = useMemo(
+    () =>
+      petaTag(
+        customers.map((c) => ({ id: c.id, name: c.name, tag: c.tag })),
+        inti?.customerAlias ?? [],
+      ),
+    [customers, inti],
+  );
+
   const nilai = useMemo<Toko>(() => {
     if (status === "live" && inti) {
       /* Baris kembar dari impor Google Sheet digabung di sini, bukan di
@@ -613,8 +645,9 @@ export function DataProvider({
         status,
         error,
         struk,
-        customers: customerUntukUI(inti.customers, inti.sales),
+        customers,
         customerAlias: inti.customerAlias ?? [],
+        tagUntukNama,
         produkSiap: produkUI.length > 0,
         produkDimuat: produkData !== null,
         produkMemuat: produkDipinta && produkData === null,
@@ -652,7 +685,7 @@ export function DataProvider({
       perbaruiSetelahTulis,
       muatUlang: muatSemuanya,
     };
-  }, [status, error, inti, struk, salesRentang, rentangTampil, ringkasStruk, produkData, produkDipinta, pastikanProduk, muatRentang, praRentang, segarkanRentang, invalidasiSetelahTulis, perbaruiSetelahTulis, muatSemuanya]);
+  }, [status, error, inti, customers, tagUntukNama, struk, salesRentang, rentangTampil, ringkasStruk, produkData, produkDipinta, pastikanProduk, muatRentang, praRentang, segarkanRentang, invalidasiSetelahTulis, perbaruiSetelahTulis, muatSemuanya]);
 
   return <Ctx.Provider value={nilai}>{children}</Ctx.Provider>;
 }

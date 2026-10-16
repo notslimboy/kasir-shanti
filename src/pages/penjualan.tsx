@@ -37,7 +37,7 @@ import { DateRangePicker, presetRentang, type DateRange } from "@/components/ui/
 import { rupiah, rupiahShort } from "@/lib/format";
 import type { Sale } from "@/lib/sale";
 import { menuTerlarisDari, trenPerHari, trenPerJam } from "@/lib/ringkasan";
-import { grupPerKurir, kurirDariTag, petaTag, rekapOngkirPerKurir } from "@/lib/kurir";
+import { grupPerKurir, kurirDariTag, rekapOngkirPerKurir } from "@/lib/kurir";
 import { cetakLaporan } from "@/lib/cetak-laporan";
 import { exportPenjualanCsv } from "@/lib/export-penjualan";
 import { usePintasan } from "@/lib/use-pintasan";
@@ -264,26 +264,16 @@ export function PenjualanPage() {
     return data.struk.filter((s) => s.customer === nama);
   }, [customer, data.struk, daftarCustomer]);
 
-  /* Tag area per nama customer.
-
-     Satu peta untuk seluruh halaman: kolom Tag, pencarian, urutan, dan
-     rekap ongkir semuanya membaca dari sini. `petaTag` sudah menangani
-     nama yang tidak sama persis ("Bhas 7/17" -> "Bhaskara 7/17"), tag yang
-     tersimpan sebagai alias, dan nama yang tidak terdaftar di customers
-     sama sekali.
+  /* Tag area per nama customer datang dari data layer, bukan dihitung di
+     sini lagi: peta itu harus sama dengan yang dipakai Beranda dan Piutang.
+     Dulu halaman ini menyusun sendiri dan hanya di sini alias disertakan,
+     jadi tiga halaman bisa menampilkan area berbeda dari data yang sama.
 
      Wajib di atas `barisDetail`, bukan di bawah: kolom Tag ikut masuk ke
      sana, jadi `tagUntukNama` harus sudah ada ketika barisDetail
      dihitung. Menaruhnya setelahnya membuat barisDetail membaca nilai
      yang belum pernah dihitung. */
-  const tagUntukNama = useMemo(
-    () =>
-      petaTag(
-        data.customers.map((c) => ({ id: c.id, name: c.name, tag: c.tag })),
-        data.customerAlias,
-      ),
-    [data.customers, data.customerAlias],
-  );
+  const { tagUntukNama } = data;
 
   /* Baris yang benar-benar tampil di tabel Detail Struk: `struk` sudah
      difilter rentang + customer, lalu disaring lagi oleh kotak pencarian

@@ -116,6 +116,48 @@ describe("petaTag", () => {
     expect(cari("Budi")).toBe("");
     expect(cari("Tanpa Tag")).toBe("");
   });
+
+  it("nama di struk yang hanya dikenal sebagai alias ikut dapat tag", () => {
+    /* Kasir menulis pelanggan yang sama dengan beberapa ejaan: "Anis BTH",
+       "Anish BTH", "ANIS BRIN". Yang disimpan sebagai alias juga harus
+       dikenali — kalau tidak, struknya tampil tanpa area padahal pelanggannya
+       punya tag, dan rekap ongkir per kurir kehilangan struk itu. */
+    const cari_ = petaTag(
+      [{ id: "c126", name: "Anis BTH", tag: "ITS" }],
+      [
+        { customer_id: 126, alias: "Anish BTH" },
+        { customer_id: 126, alias: "tagalamat:ITS" },
+      ],
+    );
+    expect(cari_("Anis BTH")).toBe("ITS");
+    expect(cari_("Anish BTH")).toBe("ITS");
+    expect(cari_("anish bth ")).toBe("ITS");
+  });
+
+  it("alias pelanggan tanpa tag tidak menghasilkan tag apa pun", () => {
+    /* Alias hanya nama lain; sumber tag tetap `customers.tag` dan alias
+       `tagalamat:`. Alias biasa tidak boleh membuat tag muncul dari udara. */
+    const tanpaTag = petaTag(
+      [{ id: "c7", name: "Warung Pak Bud", tag: null }],
+      [{ customer_id: 7, alias: "Pak Bud Warung" }],
+    );
+    expect(tanpaTag("Pak Bud Warung")).toBe("");
+  });
+
+  it("nama resmi menang atas alias pelanggan lain", () => {
+    /* Dua pelanggan bisa punya nama yang sama persis — satu sebagai nama
+       resmi, satu tersimpan sebagai alias (hasil merge misalnya). Nama
+       resmi yang menang: itu yang di-maintenance dan yang dibaca halaman
+       Customer. */
+    const cari_ = petaTag(
+      [
+        { id: "c1", name: "Budi Santoso", tag: "Sutorejo" },
+        { id: "c2", name: "Rina", tag: "GOJEK" },
+      ],
+      [{ customer_id: 2, alias: "Budi Santoso" }],
+    );
+    expect(cari_("Budi Santoso")).toBe("Sutorejo");
+  });
 });
 
 describe("rekapOngkirPerKurir", () => {

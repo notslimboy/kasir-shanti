@@ -22,7 +22,7 @@ import {
   ringkasanDari,
   type Ringkasan,
 } from "@/lib/ringkasan";
-import { grupPerKurir, petaTag, rekapOngkirPerKurir } from "@/lib/kurir";
+import { grupPerKurir, rekapOngkirPerKurir } from "@/lib/kurir";
 import { KurirCard } from "@/components/kurir-card";
 import { ChartTip } from "@/components/chart-tip";
 import { ongkirDari, tanggalISODari } from "@/lib/live-mappers";
@@ -76,9 +76,10 @@ export function Beranda() {
   const strukTerbaru: Sale[] = live.ringkasStruk.slice(0, 8);
   /* Ongkir per kurir. Kolom kurir tidak ada di tabel sales — yang ada
      customers.tag (area/franchise), dan itu yang dipetakan, persis seperti
-     script.js lama. Sumber tag: petaTag dari daftar customers. */
+     script.js lama. Peta tag-nya dari data layer supaya Beranda, Penjualan,
+     dan Piutang tidak lagi menghitung sendiri-sendiri. */
+  const { tagUntukNama } = live;
   const ongkir = useMemo(() => {
-    const tagUntukNama = petaTag(live.customers.map((c) => ({ name: c.name, tag: c.tag })));
     const rekap = rekapOngkirPerKurir(
       live.salesSemua.map((x) => ({
         ongkir: ongkirDari(x),
@@ -89,7 +90,7 @@ export function Beranda() {
       tagUntukNama,
     );
     return { ...rekap, grup: grupPerKurir(rekap.rows) };
-  }, [live.salesSemua, live.customers]);
+  }, [live.salesSemua, tagUntukNama]);
 
   return (
     <>

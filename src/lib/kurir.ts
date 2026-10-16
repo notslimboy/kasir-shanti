@@ -1,4 +1,4 @@
-import { inferTagArea, tagDariAlias } from "./tag-area";
+import { AWALAN_TAG, inferTagArea, tagDariAlias } from "./tag-area";
 
 /* ==========================================================================
    Ongkir per kurir.
@@ -82,6 +82,12 @@ type CustomerPetaTag = { id?: string; name: string; tag: string | null };
  *
  *  Yang tadinya hanya membaca kolom `tag` membuat "Anis BTH" tampil
  *  tanpa area, padahal tag-nya `ITS` tersimpan di alias `ANIS BRIN`.
+ *
+ *  Fungsi yang dikembalikan mencocokkan nama di struk ke nama pelanggan
+ *  DAN ke aliasnya, karena kasir menulis nama yang sama dengan beberapa
+ *  ejaan: "Anis BTH", "Anish BTH", dan "ANIS BRIN" semuanya pelanggan yang
+ *  sama. Alias tanpa tag tidak menambah apa pun — tag tetap hanya datang
+ *  dari pelanggan yang memang punya.
  */
 export function petaTag(
   customers: CustomerPetaTag[],
@@ -89,6 +95,13 @@ export function petaTag(
 ): (nama: string) => string {
   const langsung = new Map<string, string>();
   const daftarTag: { nama: string; tag: string }[] = [];
+
+  /* Alias yang dikenal kasir, dipakai untuk mengenali nama di struk yang
+     BUKAN nama customer-nya ("Anish BTH" untuk "Anis BTH"). Dipisah dari
+     `daftarTag` karena urutannya harus di bawah: nama resmi lebih tepat,
+     alias cuma nama lain yang kebetulan dipakai. */
+  const dariAlias = new Map<string, string>();
+  const daftarAlias: { nama: string; tag: string }[] = [];
 
   /* Alias dikelompokkan per customer_id, bukan dicocokkan lewat nama.
      Pencocokan nama rapuh: "Bhas Sari 38" dan "Bhaskara sari 38" beda satu
@@ -112,25 +125,44 @@ export function petaTag(
   for (const c of customers) {
     const nama = c.name?.trim();
     if (!nama) continue;
+    const nomor = nomorDari(c.id);
     /* Kolom tag lebih dulu. Alias `tagalamat:` baru dipakai kalau kolomnya
        kosong — kalau keduanya ada dan berbeda, kolom yang menang karena
        itu yang di-maintenance manual. */
     const dariKolom = c.tag?.trim();
-    const dariAlias = tagDariAlias(aliasPerCustomer.get(nomorDari(c.id) ?? -1) ?? []);
-    const tag = dariKolom || dariAlias || inferTagArea(nama, aliasPerCustomer.get(nomorDari(c.id) ?? -1) ?? []);
+    const aliasCustomer = aliasPerCustomer.get(nomor ?? -1) ?? [];
+    const dariAliasTersimpan = tagDariAlias(aliasCustomer);
+    const tag = dariKolom || dariAliasTersimpan || inferTagArea(nama, aliasCustomer);
     if (!tag) continue;
     langsung.set(kunciTag(nama), tag);
     daftarTag.push({ nama, tag });
+    /* Nama lain untuk customer yang sama ikut dipetakan. Tanpa ini, struk
+       yang ditulis "Anish BTH" tampil tanpa area walau pelanggannya jelas
+       "Anis BTH" — dan rekap ongkir per kurir kehilangan struknya.
+       `tagalamat:` dilewati: itu tempat menyimpan tag, bukan nama orang. */
+    for (const a of aliasCustomer) {
+      const kunci = kunciTag(a);
+      if (!kunci || kunci.startsWith(AWALAN_TAG)) continue;
+      if (!dariAlias.has(kunci)) dariAlias.set(kunci, tag);
+      daftarAlias.push({ nama: a, tag });
+    }
   }
 
   // Panjang dulu: "Bhaskara III" harus menang atas "Bhaskara".
   daftarTag.sort((a, b) => b.nama.length - a.nama.length);
+  daftarAlias.sort((a, b) => b.nama.length - a.nama.length);
 
   return (nama: string) => {
     const k = kunciTag(nama);
-    const persis = langsung.get(k);
+    const persis = langsung.get(k) ?? dariAlias.get(k);
     if (persis) return persis;
+    /* Nama resmi dulu, baru alias: kalau dua pelanggan berbeda punya nama
+       yang saling mengandung, yang namanya tertulis di struk harus menang
+       atas alias pelanggan lain. */
     for (const s of daftarTag) {
+      if (k.includes(kunciTag(s.nama))) return s.tag;
+    }
+    for (const s of daftarAlias) {
       if (k.includes(kunciTag(s.nama))) return s.tag;
     }
     /* Nama di struk sering bukan nama di customers — kasir menyingkat
