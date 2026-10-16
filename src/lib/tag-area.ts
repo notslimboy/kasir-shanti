@@ -57,9 +57,17 @@ const KATA_ITS =
 
 /* "W 6", "D 23", "T 4" — pola blok ITS. Sengaja diperiksa paling akhir:
    "BPD B 34-35" adalah BPD, bukan blok. Kalau blok diperiksa lebih dulu,
-   hampir semua nama yang berakhir angka akan tertangkap sebagai ITS. */
+   hampir semua nama yang berakhir angka akan tertangkap sebagai ITS.
+
+   Bentuk yang harus tertangkap, semuanya ejaan nyata di data:
+     "W 6"          huruf + angka
+     "ITS T 73"     dengan awalan ITS
+     "Blok V No 9"  dengan kata "No" sebelum angkanya
+     "P / 7"        huruf P, dan pemisah garis miring
+   "No"/"Nomor" boleh muncul sebelum angka karena begitulah kasir dan
+   pelanggan menulis blok. Kata "no" tanpa angka tetap tidak cocok. */
 const BLOK_ITS =
-  /\b(?:its\s*)?(?:perum\s*)?(?:blok\s*)?(?:(p1)\s*[/ -]?\s*\d+|([tuvwjdnxmrficahb])(?!\s*o\s*\d)\s*(?:lama\s*)?(?:[/.-]|\s)*[a-z]?\s*\d+)\b/;
+  /\b(?:its\s*)?(?:perum\s*)?(?:blok\s*)?(?:(p1)\s*[/ -]?\s*\d+|([tuvwjdnxmrficahbp])(?!\s*o\s*\d)\s*(?:lama\s*)?(?:[/.-]|\s)*(?:no(?:mor|m)?\.?\s*)?[a-z]?\s*\d+)\b/;
 
 const GOJEK = /\bgo\s*jek\b|\bgojek\b/;
 

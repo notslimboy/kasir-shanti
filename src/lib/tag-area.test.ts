@@ -62,9 +62,20 @@ describe("inferTagArea", () => {
 
   it("menangkap pola blok", () => {
     expect(inferTagArea("ITS W 6")).toBe("ITS");
+    expect(inferTagArea("ITS T 73")).toBe("ITS");
     expect(inferTagArea("W 6")).toBe("ITS");
     expect(inferTagArea("D 23")).toBe("ITS");
     expect(inferTagArea("T 4")).toBe("ITS");
+  });
+
+  it("menangkap blok yang ditulis dengan kata 'No' atau garis miring", () => {
+    /* Bentuk yang benar-benar dipakai pelanggan. "Blok V No 9" dan
+       "P / 7" dulu tampil tanpa area: kata "No" memutus pola huruf-angka,
+       dan huruf P tidak ada di daftar blok — padahal keduanya blok ITS.
+       Dua-duanya di data nyata pernah masuk sebagai struk tanpa kurir. */
+    expect(inferTagArea("Blok V No 9")).toBe("ITS");
+    expect(inferTagArea("P / 7")).toBe("ITS");
+    expect(inferTagArea("Blok T Nomor 12")).toBe("ITS");
   });
 
   it("blok diperiksa belakangan, jadi BPD tidak tertangkap sebagai blok", () => {
