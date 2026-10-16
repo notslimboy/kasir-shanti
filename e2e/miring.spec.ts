@@ -426,7 +426,17 @@ test.describe("mobile", () => {
 
     await expect(page).toHaveURL(/\/$/);
     await expect(page.getByRole("button", { name: "Tutup menu" })).toBeHidden();
-    await expect(page.getByRole("heading", { name: "Dashboard Penjualan" })).toBeVisible();
+    /* Jangkar halaman Beranda, BUKAN judul Penjualan.
+
+       Sebelumnya di sini diperiksa heading "Dashboard Penjualan" — judul
+       halaman yang baru saja ditinggalkan. URL berubah lebih dulu
+       (history push), sedangkan isi halaman diganti React satu-dua frame
+       kemudian; jadi assertion-nya kadang lulus karena masih membaca isi
+       halaman lama, kadang gagal karena sudah keburu diganti. Tes yang
+       menang balapan seperti itu akan muncul sebagai merah sesekali tanpa
+       ada yang rusak. KPI Beranda ini khas Beranda dan selalu ada, juga
+       saat datanya belum terbaca. */
+    await expect(page.getByText("Piutang Belum Lunas")).toBeVisible();
   });
 
   /* Kartu struk di Beranda dulu memakai bentuk waktu panjang

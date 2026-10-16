@@ -139,6 +139,11 @@ export function PenjualanPage() {
   const [status, setStatus] = useState("aktif");
   const [sedangProses, setSedangProses] = useState<number | null>(null);
   const [catatan, setCatatan] = useToast();
+  /* Tombol muat ulang punya keadaan sendiri, terpisah dari `data.status`.
+     Selama halaman sudah terisi, muat ulang TIDAK mengubah `status` (layar
+     sengaja tidak dikosongkan), jadi menunggu `status` berarti menunggu
+     sesuatu yang tidak akan pernah terjadi. */
+  const [menyegarkan, setMenyegarkan] = useState(false);
   const [konfirmasi, setKonfirmasi] = useState<Sale | null>(null);
   /* Modal terpisah dari `konfirmasi`: void bisa dibalikin, hapus permanen
      tidak. Satu modal untuk dua tingkat kejadian yang berbeda itu cepat
@@ -377,6 +382,33 @@ export function PenjualanPage() {
     }
   };
 
+  /* Muat ulang dari server, dengan laporan sebelum dan sesudahnya.
+   *
+   * Dulu satu-satunya tanda tombol ini bekerja adalah ikonnya yang
+   * berputar — dan itu pun bergantung pada `data.status`, yang tetap
+   * "live" selama muat ulang saat halaman sudah terisi. Hasilnya: ditekan,
+   * tidak ada apa pun yang berubah di layar, dan kasir tidak tahu apakah
+   * struk kasir sebelah sudah masuk atau tombolnya tidak jalan.
+   *
+   * Sekarang: ikon langsung berganti jadi pemutar begitu ditekan, dan
+   * hasilnya dilaporkan lewat toast. Laporan gagal itu bagian penting —
+   * "tidak ada struk baru" dan "server tidak terjawab" terlihat sama saja
+   * di layar, padahal yang kedua berarti angka di halaman ini masih lama. */
+  const segarkan = async () => {
+    setMenyegarkan(true);
+    setCatatan({ tone: "info", spin: true, text: "Menarik data terbaru dari server…" });
+    const berhasil = await data.muatUlang();
+    setMenyegarkan(false);
+    setCatatan(
+      berhasil
+        ? { tone: "ok", text: "Data ditarik ulang — struk terbaru dari server sudah masuk." }
+        : {
+            tone: "warn",
+            text: "Gagal menarik data dari server — angka di halaman ini masih yang lama.",
+          },
+    );
+  };
+
   /* Tulis form Ubah Data.
    *
    * After success the range is refetched with `segarkanRentang`, not
@@ -594,28 +626,48 @@ export function PenjualanPage() {
                 perangkat lain (kasir kedua) hanya muncul setelah data ditarik
                 ulang, dan halaman ini yang paling lama dibiarkan terbuka.
 
-                Ikonnya sama dengan tombol tarik produk di halaman Menu, dan
-                ikut berputar saat memuat: hasil muat ulang tidak punya teks,
-                jadi putaran itu satu-satunya tanda tombolnya bekerja. */}
+                Saat sibuk, ikonnya BERGANTI jadi pemutar berputar — bukan
+                ikon yang sama yang diputar. Dua alasan: ikon panah berputar
+                gampang terbaca sebagai "sedang memuat halaman" padahal yang
+                berjalan menarik data di belakang, dan pergantian bentuk
+                adalah tanda yang tidak bisa dikacaukan oleh animasi yang
+                belum jalan di perangkat lambat. */}
             <IconButton
-              onClick={() => void data.muatUlang()}
-              disabled={data.status === "memuat"}
-              label={data.status === "memuat" ? "Memuat ulang data" : "Muat ulang data"}
+              onClick={() => void segarkan()}
+              disabled={menyegarkan || data.status === "memuat"}
+              sibuk={menyegarkan}
+              label="Muat ulang data"
               title={
-                data.status === "memuat"
+                menyegarkan
                   ? "Sedang menarik data dari server"
                   : "Muat ulang dari server — struk dari perangkat lain ikut masuk"
               }
             >
-              <svg
-                viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.75}
-                strokeLinecap="round" strokeLinejoin="round"
-                className={`h-[18px] w-[18px] ${data.status === "memuat" ? "animate-spin" : ""}`}
-                aria-hidden="true"
-              >
-                <path d="M21 12a9 9 0 1 1-3.5-7.1" />
-                <path d="M21 4v5h-5" />
-              </svg>
+              {menyegarkan ? (
+                <svg
+                  viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.75}
+                  strokeLinecap="round" className="h-[18px] w-[18px] animate-spin" aria-hidden="true"
+                >
+                  <path d="M12 3v3" />
+                  <path d="M12 18v3" />
+                  <path d="M3 12h3" />
+                  <path d="M18 12h3" />
+                  <path d="M5.6 5.6l2.1 2.1" />
+                  <path d="M16.3 16.3l2.1 2.1" />
+                  <path d="M18.4 5.6l-2.1 2.1" />
+                  <path d="M7.7 16.3l-2.1 2.1" />
+                </svg>
+              ) : (
+                <svg
+                  viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.75}
+                  strokeLinecap="round" strokeLinejoin="round"
+                  className="h-[18px] w-[18px]"
+                  aria-hidden="true"
+                >
+                  <path d="M21 12a9 9 0 1 1-3.5-7.1" />
+                  <path d="M21 4v5h-5" />
+                </svg>
+              )}
             </IconButton>
             <button
               onClick={exportCsvSekarang}

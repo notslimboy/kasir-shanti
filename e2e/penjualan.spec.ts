@@ -40,6 +40,89 @@ test("muat ulang menarik data dari server lagi", async ({ page }) => {
     .toBeGreaterThan(sebelum);
 });
 
+/* Muat ulang menarik 3 permintaan sales + katalog; di jaringan kasir itu
+   beberapa detik. Selama itu tombolnya harus terlihat sedang bekerja, dan
+   begitu selesai hasilnya harus dilaporkan — kalau tidak, "tidak ada struk
+   baru" dan "tombolnya tidak jalan" terlihat sama saja. */
+
+test("saat menarik data, ikon tombol berganti jadi pemutar", async ({ page }) => {
+  await pakaiSupabasePalsu(page, { sales: [SALE_FIXTURE] });
+
+  /* Perlambat sales-nya dulu. Route yang didaftarkan SETELAH fixture dijalankan
+     lebih dulu, dan `fallback()` meneruskan ke handler fixture — jadi
+     perlambatannya tidak menggantikan data, cuma menunda jawabannya. */
+  await page.route("**/rest/v1/sales**", async (route) => {
+    await new Promise((r) => setTimeout(r, 900));
+    await route.fallback();
+  });
+
+  await page.goto("/penjualan");
+  await page.waitForLoadState("networkidle");
+
+  const tombol = page.getByRole("button", { name: "Muat ulang data" });
+  await tombol.click();
+
+  await expect(
+    tombol,
+    "tombol muat ulang tidak menandai dirinya sedang bekerja (aria-busy)",
+  ).toHaveAttribute("aria-busy", "true");
+
+  /* Nama aksesibilitasnya TIDAK berubah saat sibuk: tombol yang berganti nama
+     tidak bisa ditemukan lagi oleh pembaca layar maupun oleh test — persis
+     saat kasir sedang menunggunya. */
+  await expect(tombol, "nama tombol berubah saat sibuk").toHaveAttribute(
+    "aria-label",
+    "Muat ulang data",
+  );
+
+  /* Dijaring dari teksnya, bukan `getByRole("status")` telanjang: saat toast
+     berganti, yang lama masih ada sebentar untuk animasi keluarnya, jadi ada
+     dua elemen ber-role status dalam satu tarikan napas. */
+  await expect(
+    page.getByRole("status").filter({ hasText: "Menarik data terbaru" }),
+    "tidak ada laporan apa pun saat data sedang ditarik",
+  ).toBeVisible();
+});
+
+test("setelah selesai, hasil tarikan dilaporkan lewat toast", async ({ page }) => {
+  await pakaiSupabasePalsu(page, { sales: [SALE_FIXTURE] });
+  await page.goto("/penjualan");
+  await page.waitForLoadState("networkidle");
+
+  await page.getByRole("button", { name: "Muat ulang data" }).click();
+
+  await expect(
+    page.getByRole("status").filter({ hasText: "Data ditarik ulang" }),
+    "tidak ada laporan setelah data selesai ditarik — kasir tidak tahu apakah tarikannya berhasil",
+  ).toBeVisible({ timeout: 20_000 });
+});
+
+test("tarikan yang gagal dilaporkan, dan tabel lama tidak dikosongkan", async ({ page }) => {
+  await pakaiSupabasePalsu(page, { sales: [SALE_FIXTURE] });
+  await page.goto("/penjualan");
+  await page.waitForLoadState("networkidle");
+
+  const baris = page.locator("tbody tr").filter({ hasText: SALE_FIXTURE.receipt_no }).first();
+  await expect(baris, "struk tidak muncul sebelum tombol ditekan").toBeVisible();
+
+  /* Server mati setelah halaman terisi — keadaan yang paling membingungkan:
+     yang tampil masih ada, yang baru gagal. */
+  await page.route("**/rest/v1/**", (route) => route.fulfill({ status: 500, body: "boom" }));
+  await page.getByRole("button", { name: "Muat ulang data" }).click();
+
+  await expect(
+    page.getByRole("status").filter({ hasText: "Gagal menarik data" }),
+    "tarikan yang gagal tidak dilaporkan — sama saja dengan tarikan yang tidak membawa struk baru",
+  ).toBeVisible({ timeout: 20_000 });
+
+  /* Yang lama tetap di layar: menekan muat ulang saat server tidak terjawab
+     tidak boleh menghapus tabel yang sedang dibaca kasir. */
+  await expect(
+    baris,
+    "tabel dikosongkan padahal tarikan barunya gagal — data lama masih bisa dibaca",
+  ).toBeVisible();
+});
+
 test("muat ulang duduk di sebelah kiri Export CSV", async ({ page }) => {
   await pakaiSupabasePalsu(page, { sales: [SALE_FIXTURE] });
   await page.goto("/penjualan");

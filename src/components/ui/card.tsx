@@ -115,6 +115,11 @@ export function IconButton({
   /** Dipisah dari label supaya judul tooltip bisa menjelaskan alasan
       tombol mati tanpa mengubah nama aksesibilitasnya. */
   title,
+  /** Aksi panjang: tombolnya masih ada dan namanya tetap sama, tapi
+      pembaca layar (dan test) tahu ada pekerjaan yang sedang berjalan.
+      Nama tombol sengaja TIDAK ikut berubah saat sibuk — kalau berubah,
+      tombol yang sedang ditekan jadi tidak bisa ditemukan lagi. */
+  sibuk = false,
   className,
 }: {
   children: React.ReactNode;
@@ -122,6 +127,7 @@ export function IconButton({
   onClick?: () => void;
   disabled?: boolean;
   title?: string;
+  sibuk?: boolean;
   className?: string;
 }) {
   return (
@@ -129,6 +135,7 @@ export function IconButton({
       onClick={onClick}
       disabled={disabled}
       aria-label={label}
+      aria-busy={sibuk ? true : undefined}
       title={title ?? label}
       className={cn(
         "grid h-10 w-10 place-items-center rounded-full border border-border bg-card text-muted-foreground transition-colors hover:border-primary hover:text-foreground",

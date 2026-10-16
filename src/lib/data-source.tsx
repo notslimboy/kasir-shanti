@@ -107,7 +107,14 @@ type Toko = {
    *  hasil import tidak boleh terlihat "halaman sedang memuat" — daftar
    *  draft yang sedang diperiksa kasir harus tetap utuh. */
   perbaruiSetelahTulis: () => Promise<void>;
-  muatUlang: () => Promise<void>;
+  /** Buang cache, tarik ulang inti + katalog. Mengembalikan `true` kalau
+   *  tarikan ke server benar-benar berhasil.
+   *
+   *  Hasilnya dipakai tombol muat ulang di Penjualan untuk memilih pesan:
+   *  menarik data yang gagal tidak boleh dilaporkan sebagai "sudah
+   *  diperbarui". `false` BUKAN berarti layar kosong — data dari cache
+   *  atau tarikan sebelumnya tetap tampil, yang gagal hanya yang baru. */
+  muatUlang: () => Promise<boolean>;
 };
 
 const Ctx = createContext<Toko | null>(null);
@@ -480,7 +487,11 @@ export function DataProvider({
    * terisi. Sekarang urutannya dibalik: cache mengisi layar (saldi
    *ency milliseconds), lalu request berjalan di belakang. Kasir tidak pernah
    * menunggu, dan angka tetap benar begitu request selesai. */
-  const muatInti = useCallback(async () => {
+  /* Mengembalikan `true` kalau tarikan ke server berhasil. Dipakai pemanggil
+     untuk tahu apakah "berhasil" boleh ditampilkan — memeriksa `status`
+     sesudahnya tidak bisa, karena state React belum tentu sudah diperbarui
+     saat promise-nya selesai. */
+  const muatInti = useCallback(async (): Promise<boolean> => {
     setError(null);
 
     const cached = await cacheBaca<{
@@ -516,13 +527,23 @@ export function DataProvider({
         customers: d.customers,
         customerAlias: d.customerAlias,
       });
+      return true;
     } catch (e) {
-      if (cached?.data) return; // masih ada yang tampil
+      /* Gagal menarik data baru BUKAN alasan mengosongkan layar. Kalau sudah
+         ada yang tampil — dari cache di disk maupun dari tarikan sebelumnya —
+         yang lama dipertahankan; yang berubah cuma lapornya.
+
+         Dulu cabang ini hanya menjaga kalau cache DISK masih ada, padahal
+         `muatUlang` menghapus cache itu sebelum menarik. Akibatnya, server
+         yang tidak terjawab saat kasir menekan muat ulang mengosongkan
+         tabel yang sedang dia baca. */
+      if (cached?.data || intiRef.current) return false;
       setError((e as Error).message);
       setInti(null);
       setStruk([]);
       setSalesRentang([]);
       setStatus("gagal");
+      return false;
     }
   }, []);
 
@@ -578,8 +599,13 @@ export function DataProvider({
     })();
   }, [produkData]);
 
-  /* Muat ulang total = inti + katalog lagi. */
-  const muatSemuanya = useCallback(async () => {
+  /* Muat ulang total = inti + katalog lagi.
+   *
+   *  Mengembalikan hasil tarikan inti (pelanggan + struk), karena itu yang
+   *  menentukan apakah tombolnya boleh melaporkan "sudah diperbarui".
+   *  Katalog tetap dicoba; kegagalannya tidak perlu dibalapkan ke kasir
+   *  sebagai kegagalan muat ulang. */
+  const muatSemuanya = useCallback(async (): Promise<boolean> => {
     produkBerjalan = null;
     produkJalan.current = false;
     setProdukData(null);
@@ -592,12 +618,13 @@ export function DataProvider({
     lupakanSemuaRentang();
     await cacheHapus("inti", "produk");
     await cacheHapusAwalan("rentang:");
-    await muatInti();
+    const intiBerhasil = await muatInti();
     const d = await ambilProdukSekali().catch(() => null);
     if (d) {
       setProdukData(d);
       tulisCacheProduk(d);
     }
+    return intiBerhasil;
   }, [muatInti]);
 
   useEffect(() => {
