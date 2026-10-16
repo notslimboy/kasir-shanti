@@ -197,7 +197,12 @@ test("catatan per baris ditulis, tetap tampil, dan ikut ke daftar hold", async (
   const input = item.getByPlaceholder("mis. tanpa sambel, tanpa lontong");
   await expect(input).toBeVisible();
 
-  await input.fill("  tanpa sambel  ");
+  /* Diketik huruf demi huruf, bukan `fill()`. `fill()` mengirim satu string
+     utuh sekali jalan, jadi ia tetap lolos walau inputnya menormalkan catatan
+     pada setiap ketukan — dan normalisasi itu memangkas spasi, sehingga kasir
+     yang mengetik "tanpa sambel" berakhir dengan "tanpasambel". Hanya
+     pengetikan bertahap yang bisa menangkapnya. */
+  await input.pressSequentially("  tanpa sambel  ");
   await input.press("Enter");
 
   /* toHaveText membandingkan persis, jadi ini sekaligus memeriksa spasi

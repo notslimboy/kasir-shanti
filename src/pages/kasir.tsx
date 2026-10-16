@@ -11,6 +11,7 @@ import { simpanPenjualan, type BarisJual, type HasilJual } from "@/lib/simpan-pe
 import { cacheBaca, cacheKosongkanKecuali, cacheTulis } from "@/lib/cache-db";
 import { useSetelan } from "@/lib/setelan";
 import { InputCustomer } from "@/components/ui/input-customer";
+import { CatatanInput } from "@/components/ui/catatan-input";
 import { saranCustomer } from "@/lib/cocok-customer";
 import { triggerSyncFromSheet } from "@/lib/sync-google-sheet";
 import { rapikanCatatan, ringkasCatatan } from "@/lib/catatan-item";
@@ -589,21 +590,17 @@ export function KasirPage() {
                   orderan tanpa permintaan khusus adalah kasus umum,
                   jadi jangan memberatkan setiap baris untuknya. */}
               {sCatatan === i.id ? (
-                <input
-                  autoFocus
-                  value={i.note ?? ""}
-                  onChange={(e) => setCatatan(i.id, e.target.value)}
-                  onBlur={() => setSCatatan(null)}
-                  onKeyDown={(e) => {
-                    /* Enter menutup, bukan memsplit baris: kasir sedang
-                       mengisi satu catatan, bukan menulis daftar. */
-                    if (e.key === "Enter") {
-                      e.preventDefault();
-                      setSCatatan(null);
-                    }
-                  }}
+                <CatatanInput
+                  /* key per baris: tanpa itu React memakai ulang instance yang
+                     sama untuk baris berikutnya dan draft baris lama terbawa. */
+                  key={i.id}
+                  awal={i.note ?? ""}
                   placeholder="mis. tanpa sambel, tanpa lontong"
-                  aria-label={`Catatan ${i.name}`}
+                  ariaLabel={`Catatan ${i.name}`}
+                  onSelesai={(catatan) => {
+                    setCatatan(i.id, catatan ?? "");
+                    setSCatatan(null);
+                  }}
                   className={
                     "mt-2 h-9 w-full rounded-xl border border-input bg-card px-2.5 text-sm outline-none focus:border-ring focus:ring-2 focus:ring-ring/25"
                   }
