@@ -1,22 +1,20 @@
-/* Vercel function — /api/itsfood/payments
-   GET            → billables + bills + history + rekap omzet
-   GET ?id=N      → detail satu pembayaran (per-order bills)
-   POST {orderId} → buat tagihan (makeBill) dari daftar bisa-ditagih
-   Guard JWT Supabase sama dengan endpoint itsfood lain. */
+/* Vercel function — POST /api/itsfood/accept  { orderId }
+   Menerima satu order di portal supplier. Guard JWT sama dengan endpoint
+   GET: tanpa sesi Supabase yang sah, tombol Terima tidak bisa ditembak. */
 
 import {
   balasNode,
   guardItsfoodApi,
-  handleItsfoodPayments,
+  handleItsfoodAccept,
   nodeKeWebRequest,
-} from "../src/server/itsfood-server";
+} from "../../src/server/itsfood-server";
 
 export default async function handler(req: any, res: any): Promise<void> {
   try {
     const web = await nodeKeWebRequest(req);
     const denied = await guardItsfoodApi(web);
     if (denied) return void (await balasNode(res, denied));
-    await balasNode(res, await handleItsfoodPayments(web));
+    await balasNode(res, await handleItsfoodAccept(web));
   } catch (e) {
     res.statusCode = 500;
     res.setHeader("Content-Type", "application/json");
