@@ -7,7 +7,7 @@ import {
   guardItsfoodApi,
   handleItsfoodAccept,
   nodeKeWebRequest,
-} from "../../src/server/itsfood-server.js";
+} from "../itsfood-server.js";
 
 export default async function handler(req: any, res: any): Promise<void> {
   try {
