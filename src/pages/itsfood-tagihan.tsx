@@ -50,7 +50,9 @@ interface DataPayments {
   billables: ItsfoodBillable[];
   bills: ItsfoodBill[];
   history: ItsfoodPaymentHistory[];
-  rekap: RekapPembayaran;
+  /** Diturunkan di klien, tidak di-cache: bentuk cache "payments" harus
+      sama dengan halaman lain (daftar mentah saja). */
+  rekap?: RekapPembayaran;
 }
 
 async function apiPayments(paksa = false): Promise<DataPayments> {

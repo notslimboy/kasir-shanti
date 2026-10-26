@@ -52,6 +52,14 @@ const sameDay = (a: Date, b: Date) => iso(a) === iso(b);
 /* Semua GET lewat dgnCacheKlien — pindah halaman tidak fetch ulang.    */
 /* ------------------------------------------------------------------ */
 
+/** Cache `orders:<from>:<to>` menyimpan objek {orders, stale, umurDetik},
+    bukan array. Pembacaan dilakukan lewat helper ini supaya bentuknya
+    konsisten dan nilai tak terduga tidak menjatuhkan render. */
+function bacaOrdersCache(kunci: string): ItsfoodOrder[] | undefined {
+  const c = bacaCacheKlien<{ orders: ItsfoodOrder[] }>(kunci);
+  return c && Array.isArray(c.orders) ? c.orders : undefined;
+}
+
 interface InfoCache {
   stale: boolean;
   umurDetik: number;
@@ -115,10 +123,8 @@ interface DataPembayaran {
   peta: PetaBayarOrder;
 }
 
-async function apiPayments(
-  paksa = false,
-): Promise<DataPembayaran & InfoCache> {
-  return dgnCacheKlien(
+async function apiPayments(paksa = false): Promise<DataPembayaran & InfoCache> {
+  const mentah = await dgnCacheKlien(
     "payments",
     async () => {
       const res = await fetch("/api/itsfood/payments", {
@@ -126,20 +132,23 @@ async function apiPayments(
       });
       const json = await res.json().catch(() => null);
       if (!res.ok || !json?.ok) throw new Error(json?.error ?? `HTTP ${res.status}`);
-      const billables = json.billables as ItsfoodBillable[];
-      const bills = json.bills as ItsfoodBill[];
-      const history = json.history as ItsfoodPaymentHistory[];
+      /* Yang di-cache HANYA daftar mentah: Set/Map tidak bertahan
+         melewati JSON di sessionStorage, dan bentuknya harus sama dengan
+         halaman lain yang memakai kunci "payments". */
       return {
-        billables,
-        bills,
-        history,
-        peta: petaBayarDari(billables, bills, history),
+        billables: json.billables as ItsfoodBillable[],
+        bills: json.bills as ItsfoodBill[],
+        history: json.history as ItsfoodPaymentHistory[],
         stale: Boolean(json.stale),
         umurDetik: Number(json.umurDetik ?? 0),
       };
     },
     { paksa },
   );
+  return {
+    ...mentah,
+    peta: petaBayarDari(mentah.billables, mentah.bills, mentah.history),
+  };
 }
 
 /* ------------------------------------------------------------------ */
@@ -155,7 +164,7 @@ export function ItsfoodPage() {
     const k = `${b.getFullYear()}-${String(b.getMonth() + 1).padStart(2, "0")}`;
     const from = iso(new Date(b.getFullYear(), b.getMonth(), 1));
     const to = iso(new Date(b.getFullYear(), b.getMonth() + 1, 0));
-    const cached = bacaCacheKlien<ItsfoodOrder[]>(`orders:${from}:${to}`);
+    const cached = bacaOrdersCache(`orders:${from}:${to}`);
     return { kunci: k, orders: cached };
   });
   const [perBulan, setPerBulan] = useState<Record<string, ItsfoodOrder[]>>(
@@ -168,9 +177,10 @@ export function ItsfoodPage() {
   const [detailMemuat, setDetailMemuat] = useState(false);
   const [konfirmasi, setKonfirmasi] = useState<ItsfoodOrder | null>(null);
   const [menerima, setMenerima] = useState(false);
-  const [pembayaran, setPembayaran] = useState<DataPembayaran | null>(
-    () => bacaCacheKlien<DataPembayaran>("payments") ?? null,
-  );
+  const [pembayaran, setPembayaran] = useState<DataPembayaran | null>(() => {
+    const c = bacaCacheKlien<Omit<DataPembayaran, "peta">>("payments");
+    return c ? { ...c, peta: petaBayarDari(c.billables, c.bills, c.history) } : null;
+  });
   const [pembayaranGalat, setPembayaranGalat] = useState("");
   /* Umur data kalender dari server — tampil sebagai teks kecil kalau
      yang ditampilkan stale (server sudah menyeret scraping ulang). */
@@ -182,9 +192,9 @@ export function ItsfoodPage() {
   const muatPembayaran = useCallback(async (paksa = false) => {
     setPembayaranGalat("");
     if (!paksa) {
-      const cached = bacaCacheKlien<DataPembayaran>("payments");
+      const cached = bacaCacheKlien<Omit<DataPembayaran, "peta">>("payments");
       if (cached) {
-        setPembayaran(cached);
+        setPembayaran({ ...cached, peta: petaBayarDari(cached.billables, cached.bills, cached.history) });
         return;
       }
     }
@@ -212,7 +222,7 @@ export function ItsfoodPage() {
     if (!paksa) {
       const fromC = iso(new Date(bulan.getFullYear(), bulan.getMonth(), 1));
       const toC = iso(new Date(bulan.getFullYear(), bulan.getMonth() + 1, 0));
-      const cached = bacaCacheKlien<ItsfoodOrder[]>(`orders:${fromC}:${toC}`);
+      const cached = bacaOrdersCache(`orders:${fromC}:${toC}`);
       if (cached) {
         setPerBulan((lama) => ({ ...lama, [kunci]: cached }));
         setMemuat(false);

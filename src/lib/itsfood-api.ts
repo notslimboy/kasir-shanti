@@ -14,7 +14,7 @@
    ========================================================================== */
 
 const TTL_BAWAAN = 5 * 60_000;
-const PREFIKS_SIMPAN = "itsfood:v1:";
+const PREFIKS_SIMPAN = "itsfood:v2:"; /* v2: bentuk cache dinormalisasi (daftar mentah, tanpa Set/Map) */
 
 interface EntriKlien {
   data?: unknown;
