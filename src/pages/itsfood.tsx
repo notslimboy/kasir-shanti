@@ -745,7 +745,7 @@ function KartuOrder({
                  kartu pakai tint (bg-background) supaya tetap bertepi.
                  Kalau keduanya bg-background, di mobile kartu menyatu
                  dengan halaman dan bordernya tidak terlihat. */
-      className="cursor-pointer rounded-2xl border border-border bg-card p-4 shadow-card transition-colors hover:border-primary/60 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary lg:bg-background lg:shadow-none"
+      className="cursor-pointer rounded-2xl border border-input bg-card p-4 shadow-card transition-colors hover:border-primary/60 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary lg:bg-background lg:shadow-none"
     >
       {/* Header: id kiri, aksi kanan. Kartu sendiri klikabel (buka
           detail) — Terima wajib stopPropagation biar gak ikut membuka.
