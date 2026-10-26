@@ -241,7 +241,14 @@ Static SPA on Vercel. `vercel.json` rewrites `/(.*)` → `/index.html`; without 
 opening `/kasir` directly returns 404 while sidebar navigation still works.
 
 The Itsfood endpoints under `api/` deploy as Vercel functions alongside the
-static build — no extra project. They require `ITSFOOD_USERNAME` and
+static build — no extra project.
+
+**The itsfood functions are pre-bundled artifacts.** Vercel transpiles only
+files inside `api/` and resolves ESM imports strictly (explicit extension
+required), so a shared module under `src/` never loads at runtime. Sources
+live in `src/server/api/*.ts`; run `npm run build:api` after editing and
+commit the regenerated `api/itsfood/*.js`. Never hand-edit those `.js`.
+ They require `ITSFOOD_USERNAME` and
 `ITSFOOD_PASSWORD` env vars (never `VITE_`-prefixed) and verify the caller's
 Supabase JWT before touching the portal.
 
