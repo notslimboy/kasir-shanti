@@ -12,5 +12,3 @@ export default async function handler(req: Request): Promise<Response> {
   if (denied) return denied;
   return handleItsfoodGet(new URL(req.url, "https://placeholder.local"));
 }
-
-export const config = { runtime: "nodejs" };

@@ -9,5 +9,3 @@ export default async function handler(req: Request): Promise<Response> {
   if (denied) return denied;
   return handleItsfoodAccept(req);
 }
-
-export const config = { runtime: "nodejs" };
