@@ -38,9 +38,10 @@ import {
   type RekapPembayaran,
 } from "../lib/itsfood";
 
-/* Supabase jwt verification (prod only) — lazy import keeps the dev
-   middleware and any test that pulls this file free of the client. */
-import { createClient } from "@supabase/supabase-js";
+/* Verifikasi JWT Supabase via REST — TANPA @supabase/supabase-js.
+   Function Vercel dulu mati saat init karena dependency itu ikut masuk
+   bundle; satu fetch ke /auth/v1/user memberi jawaban yang sama
+   (token sah atau tidak) dengan permukaan yang jauh lebih kecil. */
 
 const BASE = "https://supplier.itsfood.id";
 const UA =
@@ -563,14 +564,18 @@ export async function guardItsfoodApi(req: Request): Promise<Response | null> {
       headers: { "Content-Type": "application/json" },
     });
   }
-  const { error } = await createClient(SUPABASE_URL, SUPABASE_ANON_KEY).auth.getUser(token);
-  if (error) {
-    return new Response(JSON.stringify({ ok: false, error: "unauthorized" }), {
-      status: 401,
-      headers: { "Content-Type": "application/json" },
+  try {
+    const r = await fetch(`${SUPABASE_URL}/auth/v1/user`, {
+      headers: { apikey: SUPABASE_ANON_KEY, Authorization: `Bearer ${token}` },
     });
+    if (r.ok) return null;
+  } catch {
+    /* jaringan/Supabase tak terjangkau — jatuh ke 401 di bawah */
   }
-  return null;
+  return new Response(JSON.stringify({ ok: false, error: "unauthorized" }), {
+    status: 401,
+    headers: { "Content-Type": "application/json" },
+  });
 }
 
 /* ------------------------------------------------------------------ */
