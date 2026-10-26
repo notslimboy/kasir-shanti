@@ -109,14 +109,20 @@ export function ItsfoodTagihanPage() {
   const muat = useCallback(async (paksa = false) => {
     setMemuat(true);
     setGalat("");
+    setToast({
+      tone: "info",
+      spin: true,
+      text: "Memuat tagihan & pembayaran dari portal…",
+    });
     try {
       setData(await apiPayments(paksa));
     } catch (e) {
       setGalat(e instanceof Error ? e.message : "Gagal memuat data pembayaran");
     } finally {
       setMemuat(false);
+      setToast(null);
     }
-  }, []);
+  }, [setToast]);
 
   useEffect(() => {
     void muat();
@@ -124,13 +130,15 @@ export function ItsfoodTagihanPage() {
 
   async function buatTagihan(b: ItsfoodBillable) {
     setMemproses(true);
+    setToast({ tone: "info", spin: true, text: `Membuat tagihan order #${b.orderId}…` });
     try {
       const hasil = await apiMakeBill(b.orderId);
-      setToast({ tone: hasil.sukses ? "ok" : "warn", text: hasil.pesan });
       setKonfirmasi(null);
-      // Daftar billables & bills berubah di portal → cache basi.
+      // Daftar billables & bills berubah di portal → cache basi. Pesan
+      // hasil dipasang setelah muat ulang (lihat catatan di itsfood.tsx).
       kosongkanCacheKlien(["payments"]);
       await muat(true);
+      setToast({ tone: hasil.sukses ? "ok" : "warn", text: hasil.pesan });
     } catch {
       setToast({ tone: "warn", text: "Gagal mengirim permintaan tagihan" });
     } finally {
@@ -152,7 +160,7 @@ export function ItsfoodTagihanPage() {
                 "text-muted-foreground transition-colors hover:border-primary hover:text-foreground",
               )}
             >
-              {memuat ? "Memuat..." : "Muat ulang"}
+              {memuat ? "Memuat…" : "Muat ulang"}
             </button>
           </div>
         }
@@ -190,7 +198,7 @@ export function ItsfoodTagihanPage() {
         <div className="mt-4">
           {!data ? (
             <p className="py-8 text-center text-sm text-muted-foreground">
-              {memuat ? "Memuat data..." : "Tidak ada data"}
+              {memuat ? "Menarik data pembayaran dari portal…" : "Tidak ada data"}
             </p>
           ) : tab === "billables" ? (
             <DaftarBillables list={data.billables} onTagih={setKonfirmasi} />
@@ -260,7 +268,7 @@ export function ItsfoodTagihanPage() {
           setDetail(null);
           setDetailMemuat(false);
         }}
-        title={detail ? `Pembayaran #${detail.id}` : "Memuat detail..."}
+        title={detail ? `Pembayaran #${detail.id}` : "Memuat rincian pembayaran…"}
         subtitle={
           detail
             ? `${tanggalJamPendek(detail.paidDate)}${detail.bank ? ` · ${detail.bank}` : ""}`
@@ -268,7 +276,7 @@ export function ItsfoodTagihanPage() {
         }
       >
         {detailMemuat && !detail ? (
-          <p className="py-6 text-center text-sm text-muted-foreground">Memuat...</p>
+          <p className="py-6 text-center text-sm text-muted-foreground">Memuat rincian pembayaran…</p>
         ) : detail ? (
           <div className="space-y-4">
             <div className="grid grid-cols-2 gap-3">
@@ -302,7 +310,7 @@ export function ItsfoodTagihanPage() {
         ) : null}
       </Modal>
 
-      <Toast toast={toast} />
+      <Toast toast={toast} posisi="atas-tengah" />
     </div>
   );
 }

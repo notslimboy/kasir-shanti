@@ -181,6 +181,13 @@ export function ItsfoodPage() {
     const kunci = `${bulan.getFullYear()}-${String(bulan.getMonth() + 1).padStart(2, "0")}`;
     setMemuat(true);
     setGalat("");
+    /* Status proses yang terlihat: tanpa ini halaman hanya diam dengan
+       teks "Memuat..." kecil, dan user tidak tahu apakah sistem bekerja. */
+    setToast({
+      tone: "info",
+      spin: true,
+      text: `Memuat order ${BULAN[bulan.getMonth()]} ${bulan.getFullYear()}…`,
+    });
     try {
       const from = iso(new Date(bulan.getFullYear(), bulan.getMonth(), 1));
       const to = iso(new Date(bulan.getFullYear(), bulan.getMonth() + 1, 0));
@@ -191,8 +198,9 @@ export function ItsfoodPage() {
       setGalat(e instanceof Error ? e.message : "Gagal memuat order itsfood");
     } finally {
       setMemuat(false);
+      setToast(null);
     }
-  }, []);
+  }, [setToast]);
 
   useEffect(() => {
     void muatBulan(bulanTampil);
@@ -285,16 +293,17 @@ export function ItsfoodPage() {
 
   async function terima(order: ItsfoodOrder) {
     setMenerima(true);
+    setToast({ tone: "info", spin: true, text: `Menerima order #${order.id}…` });
     try {
       const hasil = await apiAccept(order.id);
-      setToast({
-        tone: hasil.sukses ? "ok" : "warn",
-        text: hasil.pesan,
-      });
       setKonfirmasi(null);
       // Status berubah di portal → cache order basi, muat ulang paksa.
+      // Pesan hasil dipasang SETELAH muat ulang: muat ulang memakai toast
+      // untuk progresnya dan menutupnya sendiri, jadi pesan sukses tidak
+      // boleh dipasang lebih dulu (akan terhapus).
       kosongkanCacheKlien(["orders:"]);
       await muatBulan(bulanTampil, true);
+      setToast({ tone: hasil.sukses ? "ok" : "warn", text: hasil.pesan });
     } catch {
       setToast({ tone: "warn", text: "Gagal mengirim permintaan terima" });
     } finally {
@@ -340,7 +349,7 @@ export function ItsfoodPage() {
               }}
               className="rounded-full border border-border bg-card px-3 py-1.5 text-xs font-semibold text-muted-foreground transition-colors hover:border-primary hover:text-foreground"
             >
-              {memuat ? "Memuat..." : "Muat ulang"}
+              {memuat ? "Memuat…" : "Muat ulang"}
             </button>
           </div>
         }
@@ -559,7 +568,7 @@ export function ItsfoodPage() {
         )}
       </Modal>
 
-      <Toast toast={toast} />
+      <Toast toast={toast} posisi="atas-tengah" />
     </div>
   );
 }
@@ -1209,7 +1218,7 @@ function IsiDetailOrder({
 
       {memuat && !detail ? (
         <p className="py-6 text-center text-sm text-muted-foreground">
-          Memuat detail...
+          Memuat rincian order…
         </p>
       ) : !detail && gagal ? (
         <div className="py-6 text-center">

@@ -97,19 +97,25 @@ export function ItsfoodDashboardPage() {
   const [galat, setGalat] = useState("");
   const [periode, setPeriode] = useState<PeriodeRekap>("bulan");
   const [hariTren, setHariTren] = useState<(typeof HARI_TREN)[number]>(30);
-  const [toast] = useToast();
+  const [toast, setToast] = useToast();
 
   const muat = useCallback(async (paksa = false) => {
     setMemuat(true);
     setGalat("");
+    setToast({
+      tone: "info",
+      spin: true,
+      text: "Menarik rekap omzet & pembayaran dari portal…",
+    });
     try {
       setData(await apiPayments(paksa));
     } catch (e) {
       setGalat(e instanceof Error ? e.message : "Gagal memuat data pembayaran");
     } finally {
       setMemuat(false);
+      setToast(null);
     }
-  }, []);
+  }, [setToast]);
 
   useEffect(() => {
     void muat();
@@ -379,7 +385,7 @@ export function ItsfoodDashboardPage() {
         )}
       </Card>
 
-      <Toast toast={toast} />
+      <Toast toast={toast} posisi="atas-tengah" />
     </div>
   );
 }
