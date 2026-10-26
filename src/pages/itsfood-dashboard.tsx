@@ -31,7 +31,7 @@ import {
   type PeriodeRekap,
 } from "@/lib/itsfood";
 import { rupiah, rupiahShort } from "@/lib/format";
-import { dgnCacheKlien } from "@/lib/itsfood-api";
+import { bacaCacheKlien, dgnCacheKlien } from "@/lib/itsfood-api";
 import { cn } from "@/lib/utils";
 
 /* ==========================================================================
@@ -92,7 +92,9 @@ async function apiPayments(paksa = false): Promise<DataPayments> {
 
 export function ItsfoodDashboardPage() {
   const nav = useNavigate();
-  const [data, setData] = useState<DataPayments | null>(null);
+  const [data, setData] = useState<DataPayments | null>(
+    () => bacaCacheKlien<DataPayments>("payments") ?? null,
+  );
   const [memuat, setMemuat] = useState(true);
   const [galat, setGalat] = useState("");
   const [periode, setPeriode] = useState<PeriodeRekap>("bulan");
@@ -100,8 +102,17 @@ export function ItsfoodDashboardPage() {
   const [toast, setToast] = useToast();
 
   const muat = useCallback(async (paksa = false) => {
-    setMemuat(true);
     setGalat("");
+    /* Cache segar = langsung tampil, tanpa spinner. */
+    if (!paksa) {
+      const cached = bacaCacheKlien<DataPayments>("payments");
+      if (cached) {
+        setData(cached);
+        setMemuat(false);
+        return;
+      }
+    }
+    setMemuat(true);
     setToast({
       tone: "info",
       spin: true,

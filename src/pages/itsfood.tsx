@@ -1,4 +1,4 @@
-import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { Fragment, useCallback, useEffect, useMemo, useState } from "react";
 import { AnimatePresence, motion } from "motion/react";
 
 import { Card, CardTitle, Pill } from "@/components/ui/card";
@@ -21,7 +21,7 @@ import {
   type PetaBayarOrder,
 } from "@/lib/itsfood";
 import { rupiah } from "@/lib/format";
-import { dgnCacheKlien, kosongkanCacheKlien } from "@/lib/itsfood-api";
+import { bacaCacheKlien, dgnCacheKlien, kosongkanCacheKlien } from "@/lib/itsfood-api";
 import { cn } from "@/lib/utils";
 
 /* ==========================================================================
@@ -82,13 +82,17 @@ async function apiOrders(
 }
 
 async function apiDetail(orderId: string): Promise<ItsfoodOrderDetail> {
-  const res = await fetch(
-    `/api/itsfood/orders?id=${orderId}`,
-    { headers: { Authorization: `Bearer ${getAccessToken() ?? ""}` } },
-  );
-  const json = await res.json().catch(() => null);
-  if (!res.ok || !json?.ok) throw new Error(json?.error ?? `HTTP ${res.status}`);
-  return json.detail as ItsfoodOrderDetail;
+  /* Detail per order juga di-cache: kartu yang sudah pernah dibuka tampil
+     seketika, termasuk setelah reload penuh. */
+  return dgnCacheKlien(`detail:${orderId}`, async () => {
+    const res = await fetch(
+      `/api/itsfood/orders?id=${orderId}`,
+      { headers: { Authorization: `Bearer ${getAccessToken() ?? ""}` } },
+    );
+    const json = await res.json().catch(() => null);
+    if (!res.ok || !json?.ok) throw new Error(json?.error ?? `HTTP ${res.status}`);
+    return json.detail as ItsfoodOrderDetail;
+  });
 }
 
 async function apiAccept(orderId: string): Promise<{ sukses: boolean; pesan: string }> {
@@ -144,15 +148,29 @@ async function apiPayments(
 
 export function ItsfoodPage() {
   const [bulanTampil, setBulanTampil] = useState(() => startOfDay(new Date()));
-  const [perBulan, setPerBulan] = useState<Record<string, ItsfoodOrder[]>>({});
-  const [memuat, setMemuat] = useState(true);
+  /* Nilai awal dari cache (sinkron): pindah menu atau reload penuh tidak
+     lagi menampilkan "memuat" kalau datanya masih segar — langsung data. */
+  const [awal] = useState(() => {
+    const b = startOfDay(new Date());
+    const k = `${b.getFullYear()}-${String(b.getMonth() + 1).padStart(2, "0")}`;
+    const from = iso(new Date(b.getFullYear(), b.getMonth(), 1));
+    const to = iso(new Date(b.getFullYear(), b.getMonth() + 1, 0));
+    const cached = bacaCacheKlien<ItsfoodOrder[]>(`orders:${from}:${to}`);
+    return { kunci: k, orders: cached };
+  });
+  const [perBulan, setPerBulan] = useState<Record<string, ItsfoodOrder[]>>(
+    () => (awal.orders ? { [awal.kunci]: awal.orders } : {}),
+  );
+  const [memuat, setMemuat] = useState(!awal.orders);
   const [galat, setGalat] = useState("");
   const [hariDipilih, setHariDipilih] = useState<Date>(() => startOfDay(new Date()));
   const [detailPerId, setDetailPerId] = useState<Record<string, ItsfoodOrderDetail>>({});
   const [detailMemuat, setDetailMemuat] = useState(false);
   const [konfirmasi, setKonfirmasi] = useState<ItsfoodOrder | null>(null);
   const [menerima, setMenerima] = useState(false);
-  const [pembayaran, setPembayaran] = useState<DataPembayaran | null>(null);
+  const [pembayaran, setPembayaran] = useState<DataPembayaran | null>(
+    () => bacaCacheKlien<DataPembayaran>("payments") ?? null,
+  );
   const [pembayaranGalat, setPembayaranGalat] = useState("");
   /* Umur data kalender dari server — tampil sebagai teks kecil kalau
      yang ditampilkan stale (server sudah menyeret scraping ulang). */
@@ -163,6 +181,13 @@ export function ItsfoodPage() {
      dicache klien, dan segarkan manual lewat tombol Muat ulang. */
   const muatPembayaran = useCallback(async (paksa = false) => {
     setPembayaranGalat("");
+    if (!paksa) {
+      const cached = bacaCacheKlien<DataPembayaran>("payments");
+      if (cached) {
+        setPembayaran(cached);
+        return;
+      }
+    }
     try {
       const hasil = await apiPayments(paksa);
       setPembayaran(hasil);
@@ -180,8 +205,21 @@ export function ItsfoodPage() {
 
   const muatBulan = useCallback(async (bulan: Date, paksa = false) => {
     const kunci = `${bulan.getFullYear()}-${String(bulan.getMonth() + 1).padStart(2, "0")}`;
-    setMemuat(true);
     setGalat("");
+    /* Cache masih segar → pakai langsung. Tidak ada spinner, tidak ada
+       toast, tidak ada request: inilah yang membuat pindah menu terasa
+       instan. Tombol "Muat ulang" mengirim paksa=true untuk melewatinya. */
+    if (!paksa) {
+      const fromC = iso(new Date(bulan.getFullYear(), bulan.getMonth(), 1));
+      const toC = iso(new Date(bulan.getFullYear(), bulan.getMonth() + 1, 0));
+      const cached = bacaCacheKlien<ItsfoodOrder[]>(`orders:${fromC}:${toC}`);
+      if (cached) {
+        setPerBulan((lama) => ({ ...lama, [kunci]: cached }));
+        setMemuat(false);
+        return;
+      }
+    }
+    setMemuat(true);
     /* Status proses yang terlihat: tanpa ini halaman hanya diam dengan
        teks "Memuat..." kecil, dan user tidak tahu apakah sistem bekerja. */
     setToast({
@@ -869,14 +907,17 @@ function bersihkanNamaItem(name: string): string {
 }
 
 /** Nilai terakhir yang tidak null — konten dialog tetap stabil selama
-    animasi EXIT berjalan setelah state-nya dinolkan. Tanpa ini, parent
-    melepas isi dialog seketika dan yang terlihat "tutup tanpa animasi". */
-function useNilaiTerakhir<T>(nilai: T): T {
-  const ref = useRef(nilai);
-  useEffect(() => {
-    if (nilai !== null) ref.current = nilai;
-  });
-  return ref.current;
+    animasi EXIT berjalan setelah state-nya dinolkan.
+
+    Disimpan di state, BUKAN ref: ref baru terisi di useEffect (setelah
+    render), jadi render pertama setelah klik masih membaca nilai lama
+    (null) dan dialog tampil kosong sampai ada render lain — persis bug
+    "harus ditutup lalu dibuka lagi". setState saat render aman di sini
+    karena kondisinya menyempit (hanya saat nilai baru berbeda). */
+function useNilaiTerakhir<T>(nilai: T | null): T | null {
+  const [akhir, setAkhir] = useState<T | null>(nilai);
+  if (nilai !== null && nilai !== akhir) setAkhir(nilai);
+  return akhir;
 }
 
 /* ------------------------------------------------------------------ */
@@ -1121,7 +1162,7 @@ function SheetBawah({
             >
               <span className="h-1.5 w-10 rounded-full bg-muted-foreground/30" />
             </button>
-            <div className="min-h-0 flex-1 overflow-y-auto px-5 pb-6">{children}</div>
+            <div className="min-h-0 overflow-y-auto px-5 pb-6">{children}</div>
           </motion.div>
         </div>
       )}

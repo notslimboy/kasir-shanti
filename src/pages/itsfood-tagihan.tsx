@@ -27,7 +27,7 @@ import {
   tanggalPendekItsfood,
 } from "@/lib/itsfood";
 import { rupiah } from "@/lib/format";
-import { dgnCacheKlien, kosongkanCacheKlien } from "@/lib/itsfood-api";
+import { bacaCacheKlien, dgnCacheKlien, kosongkanCacheKlien } from "@/lib/itsfood-api";
 import { cn } from "@/lib/utils";
 
 /* ==========================================================================
@@ -97,7 +97,9 @@ async function apiDetailPayment(paymentId: string): Promise<ItsfoodPaymentDetail
 
 export function ItsfoodTagihanPage() {
   const [tab, setTab] = useState<Tab>("billables");
-  const [data, setData] = useState<DataPayments | null>(null);
+  const [data, setData] = useState<DataPayments | null>(
+    () => bacaCacheKlien<DataPayments>("payments") ?? null,
+  );
   const [memuat, setMemuat] = useState(true);
   const [galat, setGalat] = useState("");
   const [konfirmasi, setKonfirmasi] = useState<ItsfoodBillable | null>(null);
@@ -108,8 +110,17 @@ export function ItsfoodTagihanPage() {
   const [toast, setToast] = useToast();
 
   const muat = useCallback(async (paksa = false) => {
-    setMemuat(true);
     setGalat("");
+    /* Cache segar = langsung tampil, tanpa spinner. */
+    if (!paksa) {
+      const cached = bacaCacheKlien<DataPayments>("payments");
+      if (cached) {
+        setData(cached);
+        setMemuat(false);
+        return;
+      }
+    }
+    setMemuat(true);
     setToast({
       tone: "info",
       spin: true,

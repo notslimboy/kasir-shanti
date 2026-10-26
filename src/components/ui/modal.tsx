@@ -100,7 +100,7 @@ export function Modal({
               </button>
             </header>
 
-            <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain p-4">{children}</div>
+            <div className="min-h-0 overflow-y-auto overscroll-contain p-4">{children}</div>
 
             {footer && <footer className="shrink-0 border-t border-border p-4">{footer}</footer>}
           </motion.div>
