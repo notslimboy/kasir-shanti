@@ -4,6 +4,7 @@ import { AnimatePresence, motion } from "motion/react";
 import { Card, CardTitle, Pill } from "@/components/ui/card";
 import { Modal } from "@/components/ui/modal";
 import { Toast, useToast } from "@/components/ui/toast";
+import { Memuat } from "@/components/ui/memuat";
 import { getAccessToken } from "@/supabase/client";
 import {
   linkWa,
@@ -1217,9 +1218,7 @@ function IsiDetailOrder({
       </p>
 
       {memuat && !detail ? (
-        <p className="py-6 text-center text-sm text-muted-foreground">
-          Memuat rincian order…
-        </p>
+        <Memuat teks={`Memuat rincian order #${order.id}…`} />
       ) : !detail && gagal ? (
         <div className="py-6 text-center">
           <p className="text-sm font-medium text-destructive">

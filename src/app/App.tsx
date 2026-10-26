@@ -3,6 +3,7 @@ import { Route, Routes, useLocation, useNavigate } from "react-router-dom";
 import { AnimatePresence, motion } from "motion/react";
 
 import { Sidebar } from "@/components/sidebar";
+import { ErrorBoundary } from "@/components/ui/error-boundary";
 import { ImporPesananPage } from "@/pages/impor-pesanan";
 import { ItsfoodDashboardPage } from "@/pages/itsfood-dashboard";
 import { ItsfoodPage } from "@/pages/itsfood";
@@ -286,6 +287,9 @@ function AppShell() {
       <div className="min-w-0 flex-1">
         <main className="px-4 py-5 lg:px-7 lg:py-6">
           <AnimatePresence mode="wait">
+            {/* Boundary memakai key route: pindah halaman melepas error
+                halaman sebelumnya, jadi user tidak terjebak di layar gagal. */}
+            <ErrorBoundary key={loc.pathname} nama={loc.pathname === "/" ? "Dashboard" : loc.pathname.replace("/", "")}>
             <motion.div
               key={loc.pathname}
               initial={{ opacity: 0, y: 8 }}
@@ -313,6 +317,7 @@ function AppShell() {
                 <Route path="/pengaturan" element={<PengaturanPage />} />
               </Routes>
             </motion.div>
+            </ErrorBoundary>
           </AnimatePresence>
 
         </main>

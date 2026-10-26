@@ -3,6 +3,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Card, Pill } from "@/components/ui/card";
 import { Modal } from "@/components/ui/modal";
 import { Toast, useToast } from "@/components/ui/toast";
+import { Memuat } from "@/components/ui/memuat";
 import { PageHeader, Tabs } from "@/components/ui/kit";
 import { RekapPembayaranStrip } from "@/components/itsfood-rekap";
 import { BadgeBank } from "@/components/itsfood-bank";
@@ -276,7 +277,7 @@ export function ItsfoodTagihanPage() {
         }
       >
         {detailMemuat && !detail ? (
-          <p className="py-6 text-center text-sm text-muted-foreground">Memuat rincian pembayaran…</p>
+          <Memuat teks="Memuat rincian pembayaran dari portal…" />
         ) : detail ? (
           <div className="space-y-4">
             <div className="grid grid-cols-2 gap-3">
