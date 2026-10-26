@@ -9,7 +9,7 @@ import {
   guardItsfoodApi,
   handleItsfoodPayments,
   nodeKeWebRequest,
-} from "../../src/server/itsfood-server";
+} from "../../src/server/itsfood-server.js";
 
 export default async function handler(req: any, res: any): Promise<void> {
   try {
