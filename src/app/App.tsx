@@ -4,6 +4,9 @@ import { AnimatePresence, motion } from "motion/react";
 
 import { Sidebar } from "@/components/sidebar";
 import { ImporPesananPage } from "@/pages/impor-pesanan";
+import { ItsfoodDashboardPage } from "@/pages/itsfood-dashboard";
+import { ItsfoodPage } from "@/pages/itsfood";
+import { ItsfoodTagihanPage } from "@/pages/itsfood-tagihan";
 import { DataProvider, useData } from "@/lib/data-source";
 import { AuthProvider, useAuth } from "@/lib/auth";
 import { triggerSyncFromSheet } from "@/lib/sync-google-sheet";
@@ -42,6 +45,9 @@ const NAV_TO_ROUTE: Record<string, string> = {
   struk: "/penjualan",
   customer: "/customer",
   piutang: "/piutang",
+  "itsfood-dash": "/itsfood-dashboard",
+  itsfood: "/itsfood",
+  "itsfood-pay": "/itsfood-tagihan",
   pengaturan: "/pengaturan",
 };
 
@@ -301,6 +307,9 @@ function AppShell() {
                 <Route path="/penjualan" element={<PenjualanPage />} />
                 <Route path="/piutang" element={<PiutangPage />} />
                 <Route path="/customer" element={<CustomerPage />} />
+                <Route path="/itsfood-dashboard" element={<ItsfoodDashboardPage />} />
+                <Route path="/itsfood" element={<ItsfoodPage />} />
+                <Route path="/itsfood-tagihan" element={<ItsfoodTagihanPage />} />
                 <Route path="/pengaturan" element={<PengaturanPage />} />
               </Routes>
             </motion.div>

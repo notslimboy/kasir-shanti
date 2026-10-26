@@ -1,3 +1,5 @@
+import { Fragment } from "react";
+
 import { cn } from "@/lib/utils";
 
 /* ==========================================================================
@@ -11,7 +13,16 @@ import { cn } from "@/lib/utils";
    di tablet dan phone form-nya bukan tempat yang masuk akal. Di bawah lg
    item ini disembunyikan (tidak dihapus) supaya route-nya tetap bisa
    dibuka langsung dari URL desktop. */
-type NavItem = { id: string; label: string; icon: IkonNama; desktopOnly?: boolean };
+type NavItem = {
+  id: string;
+  /** Nama aksesibel (sr-only) — harus unik antar item, dipakai E2E. */
+  label: string;
+  /** Tooltip pendek; konteks seksi (ITS Food) sudah mengikat, jadi
+      tooltip boleh versi ringkas tanpa mengulang "Itsfood". */
+  tip?: string;
+  icon: IkonNama;
+  desktopOnly?: boolean;
+};
 
 const NAV: readonly NavItem[] = [
   { id: "impor", label: "Import Pesanan", icon: "import", desktopOnly: true },
@@ -21,6 +32,13 @@ const NAV: readonly NavItem[] = [
   { id: "struk", label: "Struk", icon: "receipt" },
   { id: "customer", label: "Customer", icon: "users" },
   { id: "piutang", label: "Piutang", icon: "wallet" },
+  /* Seksi ITSfood — diawali divider + label mini (dirender di map di
+     bawah). Tiga menu: dashboard rekap, jadwal order, payment. Semua
+     tetap tampil di mobile: dari HP data order justru paling sering
+     dicek. */
+  { id: "itsfood-dash", label: "Dashboard Itsfood", tip: "Dashboard", icon: "chart" },
+  { id: "itsfood", label: "Order Itsfood", tip: "Order", icon: "truck" },
+  { id: "itsfood-pay", label: "Payment Itsfood", tip: "Payment", icon: "banknote" },
   { id: "pengaturan", label: "Pengaturan", icon: "cog" },
 ] as const;
 
@@ -33,6 +51,8 @@ type IkonNama =
   | "users"
   | "wallet"
   | "chart"
+  | "truck"
+  | "banknote"
   | "cog";
 
 function Icon({ name }: { name: IkonNama }) {
@@ -45,6 +65,8 @@ function Icon({ name }: { name: IkonNama }) {
     users: "M8 11a3 3 0 1 0 0-6 3 3 0 0 0 0 6ZM3 20a5 5 0 0 1 10 0M16 11a3 3 0 1 0 0-6M15 15.5a5 5 0 0 1 6 4.5",
     wallet: "M3 7h15a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7Zm0 0 3-3h10M17 13h.01",
     chart: "M4 20V10M10 20V4M16 20v-7M22 20H2",
+    truck: "M3 7h11v9H3zM14 11h3.6l2.9 3v2H14zM7.5 19a1.5 1.5 0 1 0 0-3 1.5 1.5 0 0 0 0 3ZM17.5 19a1.5 1.5 0 1 0 0-3 1.5 1.5 0 0 0 0 3Z",
+    banknote: "M3 6h18v12H3zM12 9a3 3 0 1 0 0 6 3 3 0 0 0 0-6ZM6 9h.01M18 15h.01",
     cog: "M12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6Zm8-3a8 8 0 0 0-.15-1.5l2-1.6-2-3.4-2.4 1a8 8 0 0 0-2.6-1.5L14.5 2h-4l-.35 2.5A8 8 0 0 0 7.55 6L5.1 5 3.1 8.4l2 1.6a8 8 0 0 0 0 3l-2 1.6L5.1 18l2.45-1a8 8 0 0 0 2.6 1.5L10.5 22h4l.35-2.5a8 8 0 0 0 2.6-1.5l2.4 1 2-3.4-2-1.6A8 8 0 0 0 20 12Z",
   }[name];
   return (
@@ -151,31 +173,44 @@ export function Sidebar({
       {NAV.map((n) => {
         const isActive = n.id === active;
         return (
-          <button
-            key={n.id}
-            onClick={() => onSelect?.(n.id)}
-            aria-current={isActive ? "page" : undefined}
-            title={n.label}
-            className={cn(
-              /* 46px di rail 88px menyisakan 21px tiap sisi — ruang cukup
-                 untuk penanda aktif tanpa harus keluar dari rail. */
-              "relative grid h-[46px] w-[46px] shrink-0 place-items-center rounded-[14px] transition-colors",
-              /* Item desktop-only: sembunyi di tablet/phone, muncul di lg+ */
-              n.desktopOnly && "hidden lg:grid",
-              isActive
-                ? "bg-white/10 text-sidebar-primary"
-                : "text-sidebar-foreground/55 hover:bg-white/5 hover:text-sidebar-foreground",
+          <Fragment key={n.id}>
+            {/* Divider + label seksi "ITS FOOD": penanda bahwa item di
+                bawahnya adalah integrasi eksternal, bukan menu kasir.
+                Dekoratif murni (aria-hidden) — nama aksesibel tetap milik
+                tombol (sr-only), label seksi tidak ikut menumpuk. */}
+            {n.id === "itsfood-dash" && (
+              <div aria-hidden="true" className="my-2 flex w-full flex-col items-center gap-1.5">
+                <span className="h-px w-8 bg-white/15" />
+                <span className="text-[10px] font-extrabold uppercase leading-none tracking-[0.08em] text-sidebar-foreground/70">
+                  ITS Food
+                </span>
+              </div>
             )}
-          >
-            {isActive && (
-              /* Penanda aktif DI DALAM rail (left-0). Semuanya -left-[18px]
-                 keluar dari rail, ikut terpotong sudut membulatnya, dan
-                 terlihat seperti render yang bocor ke halaman. */
-              <span className="absolute left-0 top-1/2 h-5 w-[3px] -translate-y-1/2 rounded-r-full bg-sidebar-primary" />
-            )}
-            <Icon name={n.icon} />
-            <span className="sr-only">{n.label}</span>
-          </button>
+            <button
+              onClick={() => onSelect?.(n.id)}
+              aria-current={isActive ? "page" : undefined}
+              title={n.tip ?? n.label}
+              className={cn(
+                /* 46px di rail 88px menyisakan 21px tiap sisi — ruang cukup
+                   untuk penanda aktif tanpa harus keluar dari rail. */
+                "relative grid h-[46px] w-[46px] shrink-0 place-items-center rounded-[14px] transition-colors",
+                /* Item desktop-only: sembunyi di tablet/phone, muncul di lg+ */
+                n.desktopOnly && "hidden lg:grid",
+                isActive
+                  ? "bg-white/10 text-sidebar-primary"
+                  : "text-sidebar-foreground/55 hover:bg-white/5 hover:text-sidebar-foreground",
+              )}
+            >
+              {isActive && (
+                /* Penanda aktif DI DALAM rail (left-0). Semuanya -left-[18px]
+                   keluar dari rail, ikut terpotong sudut membulatnya, dan
+                   terlihat seperti render yang bocor ke halaman. */
+                <span className="absolute left-0 top-1/2 h-5 w-[3px] -translate-y-1/2 rounded-r-full bg-sidebar-primary" />
+              )}
+              <Icon name={n.icon} />
+              <span className="sr-only">{n.label}</span>
+            </button>
+          </Fragment>
         );
       })}
       </div>

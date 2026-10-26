@@ -240,6 +240,11 @@ build that hosting actually serves.
 Static SPA on Vercel. `vercel.json` rewrites `/(.*)` → `/index.html`; without it,
 opening `/kasir` directly returns 404 while sidebar navigation still works.
 
+The Itsfood endpoints under `api/` deploy as Vercel functions alongside the
+static build — no extra project. They require `ITSFOOD_USERNAME` and
+`ITSFOOD_PASSWORD` env vars (never `VITE_`-prefixed) and verify the caller's
+Supabase JWT before touching the portal.
+
 Optional env (defaults are inlined in `src/supabase/client.ts`):
 
 ```
@@ -273,10 +278,16 @@ SQL: `supabase/migrations/`.
 ```
 src/app/            React entry + auth gate
 src/pages/          beranda, kasir, menu, penjualan, piutang, customer,
-                    impor-pesanan, pengaturan, masuk
+                    impor-pesanan, itsfood, pengaturan, masuk
 src/components/     UI components (shadcn-style plus the Shanti kit)
 src/lib/            domain logic — impor-pesanan, struk, pricing, sync, and so on
+src/server/         itsfood-server.ts — scraping of supplier.itsfood.id
+                    (login fresh per request, HTML parsers, accept flow)
 src/supabase/       client + types
+api/                Vercel functions (itsfood-orders, itsfood-accept) that
+                    expose src/server/itsfood-server.ts as same-origin
+                    endpoints; vite.config.ts mounts the same handlers as a
+                    dev middleware so `npm run dev` needs no extra process
 supabase/migrations/  RLS and auth SQL. JALANKAN-INI.sql is the one to
                     paste; the numbered files are its parts, kept separate
                     for review
@@ -317,6 +328,11 @@ legacy/             old stack documentation — does not describe this repo
   total at creation silently erases the debt; do not restore that.
 - Visual tokens and rules live in `DESIGN.md`. Values are sampled from pixels in
   `design/reference.png`, never guessed.
+- Itsfood scraping is layered: `src/lib/itsfood.ts` holds pure HTML parsers
+  (fixture-tested, no network), `src/server/itsfood-server.ts` holds all
+  portal I/O, and `api/*.ts` + the Vite dev middleware are thin HTTP wrappers
+  around it. Portal statuses ("Belum diproses") stay verbatim Indonesian —
+  they are matched with `includes`, never translated in code.
 - Never commit `customers.csv`, `Chat*.txt`, `orderan/`, or
   `playwright-report/`. They are gitignored, but check `git status` before
   committing anyway.

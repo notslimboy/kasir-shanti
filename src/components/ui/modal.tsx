@@ -30,11 +30,34 @@ export function Modal({
       if (e.key === "Escape") onClose();
     };
     document.addEventListener("keydown", onKey);
-    const prev = document.body.style.overflow;
+    /* Kunci scroll: `overflow:hidden` saja bocor — iOS Safari tetap
+       menggulir body di baliknya, dan panel belakang ikut lompat posisi.
+       Teknik position:fixed + offset scroll membumikan halaman di tempat
+       dan mengembalikannya persis saat modal ditutup. */
+    const y = window.scrollY;
+    const prev = {
+      position: document.body.style.position,
+      top: document.body.style.top,
+      left: document.body.style.left,
+      right: document.body.style.right,
+      width: document.body.style.width,
+      overflow: document.body.style.overflow,
+    };
+    document.body.style.position = "fixed";
+    document.body.style.top = `-${y}px`;
+    document.body.style.left = "0";
+    document.body.style.right = "0";
+    document.body.style.width = "100%";
     document.body.style.overflow = "hidden";
     return () => {
       document.removeEventListener("keydown", onKey);
-      document.body.style.overflow = prev;
+      document.body.style.position = prev.position;
+      document.body.style.top = prev.top;
+      document.body.style.left = prev.left;
+      document.body.style.right = prev.right;
+      document.body.style.width = prev.width;
+      document.body.style.overflow = prev.overflow;
+      window.scrollTo(0, y);
     };
   }, [open, onClose]);
 
