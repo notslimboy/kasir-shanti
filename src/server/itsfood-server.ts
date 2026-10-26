@@ -573,6 +573,44 @@ export async function guardItsfoodApi(req: Request): Promise<Response | null> {
   return null;
 }
 
+/* ------------------------------------------------------------------ */
+/* Adapter Node ↔ Web untuk Vercel functions                           */
+/* ------------------------------------------------------------------ */
+
+/** Runtime @vercel/node memakai (req, res) gaya Node; seluruh logika
+    di atas berbicara Web Request/Response (dipakai bareng middleware
+    dev). Konversi dua arah di sini — satu-satunya tempat tahu soal
+    IncomingMessage. */
+export async function nodeKeWebRequest(req: any): Promise<Request> {
+  const proto = req.headers["x-forwarded-proto"] ?? "https";
+  const host = req.headers["x-forwarded-host"] ?? req.headers.host ?? "localhost";
+  const url = `${proto}://${host}${req.url ?? "/"}`;
+  const headers = new Headers();
+  for (const [k, v] of Object.entries(req.headers ?? {})) {
+    if (Array.isArray(v)) for (const x of v) headers.append(k, x);
+    else if (v != null) headers.set(k, v as string);
+  }
+  const method = (req.method ?? "GET").toUpperCase();
+  let body: string | undefined;
+  if (method !== "GET" && method !== "HEAD") {
+    const chunks: Buffer[] = [];
+    for await (const chunk of req) chunks.push(chunk as Buffer);
+    if (chunks.length) body = Buffer.concat(chunks).toString("utf8");
+  }
+  return new Request(url, {
+    method,
+    headers,
+    body,
+  });
+}
+
+export function balasNode(res: any, r: Response): Promise<void> {
+  res.statusCode = r.status;
+  const ct = r.headers.get("content-type");
+  if (ct) res.setHeader("Content-Type", ct);
+  return r.text().then((t) => res.end(t));
+}
+
 function json(data: unknown, status = 200): Response {
   return new Response(JSON.stringify(data), {
     status,

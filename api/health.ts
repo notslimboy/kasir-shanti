@@ -1,6 +1,6 @@
 /* Probe deployment — diagnosis apakah api/ functions ter-detect. */
-export default function handler(): Response {
-  return new Response(JSON.stringify({ ok: true, probe: "health" }), {
-    headers: { "Content-Type": "application/json" },
-  });
+export default function handler(_req: any, res: any): void {
+  res.statusCode = 200;
+  res.setHeader("Content-Type", "application/json");
+  res.end(JSON.stringify({ ok: true, probe: "health" }));
 }
