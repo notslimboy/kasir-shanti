@@ -8,6 +8,7 @@ import { ImporPesananPage } from "@/pages/impor-pesanan";
 import { ItsfoodDashboardPage } from "@/pages/itsfood-dashboard";
 import { ItsfoodPage } from "@/pages/itsfood";
 import { ItsfoodTagihanPage } from "@/pages/itsfood-tagihan";
+import { ItsfoodProdukPage } from "@/pages/itsfood-produk";
 import { DataProvider, useData } from "@/lib/data-source";
 import { AuthProvider, useAuth } from "@/lib/auth";
 import { triggerSyncFromSheet } from "@/lib/sync-google-sheet";
@@ -47,8 +48,9 @@ const NAV_TO_ROUTE: Record<string, string> = {
   customer: "/customer",
   piutang: "/piutang",
   "itsfood-dash": "/itsfood-dashboard",
-  itsfood: "/itsfood",
+  "itsfood-orders": "/itsfood-orders",
   "itsfood-pay": "/itsfood-tagihan",
+  "itsfood-produk": "/itsfood-produk",
   pengaturan: "/pengaturan",
 };
 
@@ -312,8 +314,9 @@ function AppShell() {
                 <Route path="/piutang" element={<PiutangPage />} />
                 <Route path="/customer" element={<CustomerPage />} />
                 <Route path="/itsfood-dashboard" element={<ItsfoodDashboardPage />} />
-                <Route path="/itsfood" element={<ItsfoodPage />} />
+                <Route path="/itsfood-orders" element={<ItsfoodPage />} />
                 <Route path="/itsfood-tagihan" element={<ItsfoodTagihanPage />} />
+                <Route path="/itsfood-produk" element={<ItsfoodProdukPage />} />
                 <Route path="/pengaturan" element={<PengaturanPage />} />
               </Routes>
             </motion.div>

@@ -11,8 +11,11 @@ import {
   parseOrderRow,
   parseOrdersPage,
   parsePaymentDetail,
+  parseProductDetail,
+  parseProductsPage,
   parseRupiah,
   petaBayarDari,
+  listsRentangDari,
   rekapPembayaranDari,
   splitDate,
   statusBayarOrder,
@@ -23,7 +26,42 @@ import {
 } from "./itsfood";
 
 /* Fixtures mimic the portal's real markup (CodeIgniter + DaisyUI +
-   responsive label divs) without copying any real customer data. */
+   responsive label divs) without copying any real customer data.
+
+   Product fixtures — the portal's /products page has a responsive table
+   with mobile label divs, same pattern as payments/bills tables. */
+
+const PROD_ROW = `
+<tr>
+  <td><div class="lg:hidden">Id:</div>1001</td>
+  <td><div class="lg:hidden">Nama:</div>Nasi Goreng</td>
+  <td><div class="lg:hidden">Kategori:</div>Makanan</td>
+  <td><div class="lg:hidden">Harga:</div>Rp. 35,000</td>
+  <td><div class="lg:hidden">COGS:</div>Rp. 20,000</td>
+  <td><div class="lg:hidden">Status:</div>Aktif</td>
+  <td><div class="lg:hidden">Created At:</div>2026-09-01</td>
+</tr>`;
+
+const PROD_PAGE = `<table><tbody>${PROD_ROW}</tbody></table>`;
+
+const PROD_DETAIL_SECTION = `
+<section>
+  <ul>
+    <li><h5>Nama:</h5><span>Soto Ayam</span></li>
+    <li><h5>Supplier:</h5><span>PT Supplier</span></li>
+    <li><h5>Kategori:</h5><span>Makanan</span></li>
+    <li><h5>Status:</h5><span>Aktif</span></li>
+    <li><h5>Description:</h5><span>Soto ayam dengan kuah kuning</span></li>
+    <li><h5>Harga:</h5><span>Rp. 40,000</span></li>
+    <li><h5>COGS:</h5><span>Rp. 22,000</span></li>
+    <li><h5>Min Order:</h5><span>1</span></li>
+    <li><h5>Max Order:</h5><span>100</span></li>
+    <li><h5>Pre Order Days:</h5><span>0</span></li>
+    <li><h5>Pre Order Hours:</h5><span>0</span></li>
+    <li><h5>Tags:</h5><span>halal, soto</span></li>
+    <li><h5>Created at:</h5><span>2026-08-15</span></li>
+  </ul>
+</section>`;
 
 const ROW_PENDING = `
 <tr class="block lg:table-row">
@@ -274,6 +312,15 @@ const BILLS_HTML = `
   <td><div class="lg:hidden">Receivable:</div><div>Rp. 1,770,000</div></td>
   <td><div class="lg:hidden">Status:</div><div>pending</div></td>
 </tr>
+<tr>
+  <td><div class="lg:hidden">Bill ID:</div><div>56704</div></td>
+  <td><div class="lg:hidden">Order ID:</div><div>183999</div></td>
+  <td><div class="lg:hidden">Created At:</div><div>2026-10-26 11:30</div></td>
+  <td><div class="lg:hidden">Process Date:</div><div>-</div></td>
+  <td><div class="lg:hidden">Paid Date:</div><div>-</div></td>
+  <td><div class="lg:hidden">Receivable:</div><div>Rp. 500,000</div></td>
+  <td><div class="lg:hidden">Status:</div><div>pending</div></td>
+</tr>
 </tbody></table>`;
 
 const HISTORY_HTML = `
@@ -329,12 +376,15 @@ describe("parser payments", () => {
 
   it("bills: id tagihan, order, tanggal, receivable, status", () => {
     const list = parseBillsPage(BILLS_HTML);
-    expect(list).toHaveLength(1);
+    expect(list).toHaveLength(2);
     expect(list[0].billId).toBe("56703");
     expect(list[0].orderId).toBe("183420");
     expect(list[0].status).toBe("pending");
     expect(list[0].receivableValue).toBe(1770000);
     expect(list[0].processDate).toBe("-");
+    expect(list[1].billId).toBe("56704");
+    expect(list[1].orderId).toBe("183999");
+    expect(list[1].receivableValue).toBe(500000);
   });
 
   it("history: total, bank, daftar order id terpisah koma", () => {
@@ -363,14 +413,14 @@ describe("tanggal & label status", () => {
 
   it("status tagihan portal → label manusia + tone pill", () => {
     expect(labelStatusBill("pending")).toEqual({
-      label: "Menunggu Pembayaran",
+      label: "Belum Bayar",
       tone: "warning",
     });
-    expect(labelStatusBill("paid")).toEqual({ label: "Terbayar", tone: "success" });
-    // varian ejaan portal semuanya jatuh ke "Diproses"
-    expect(labelStatusBill("process")).toEqual({ label: "Diproses", tone: "neutral" });
-    expect(labelStatusBill("processed")).toEqual({ label: "Diproses", tone: "neutral" });
-    expect(labelStatusBill("PROCESSED")).toEqual({ label: "Diproses", tone: "neutral" });
+    expect(labelStatusBill("paid")).toEqual({ label: "Lunas di Itsfood", tone: "success" });
+    // varian ejaan portal semuanya jatuh ke "Diverifikasi"
+    expect(labelStatusBill("process")).toEqual({ label: "Diverifikasi", tone: "neutral" });
+    expect(labelStatusBill("processed")).toEqual({ label: "Diverifikasi", tone: "neutral" });
+    expect(labelStatusBill("PROCESSED")).toEqual({ label: "Diverifikasi", tone: "neutral" });
     expect(labelStatusBill("aneh")).toEqual({ label: "aneh", tone: "neutral" });
   });
 });
@@ -393,7 +443,7 @@ const PAYMENT_DETAIL_HTML = `
   <tbody>
     <tr>
       <td><div class="lg:hidden">Bill Id:</div><div>55438</div></td>
-      <td><div class="lg:hidden">Order Id:</div><div>182308</div></td>
+      <td><div class="lg:hidden">Order Id:</div><div>183420</div></td>
       <td><div class="lg:hidden">Delivery Date:</div><div>2026-10-15 11:30:00</div></td>
       <td><div class="lg:hidden">Payable:</div><div>Rp. 756,000</div></td>
       <td><div class="lg:hidden">Billed At:</div><div>2026-10-15 14:18:34</div></td>
@@ -411,7 +461,7 @@ describe("parsePaymentDetail", () => {
     expect(d?.bills).toEqual([
       {
         billId: "55438",
-        orderId: "182308",
+        orderId: "183420",
         deliveryDate: "2026-10-15 11:30:00",
         payable: "Rp. 756,000",
         payableValue: 756000,
@@ -484,13 +534,16 @@ describe("rekap & peta pembayaran", () => {
   const bills = parseBillsPage(BILLS_HTML);
   const history = parseHistoryPage(HISTORY_HTML);
 
-  it("omzet = bisa ditagih + proses + terbayar", () => {
+  it("omzet = bisa ditagih + belum terbayar + uang masuk", () => {
     const rekap = rekapPembayaranDari(billables, bills, history);
-    // 1,770,000 + 280,800 (billable) + 1,770,000 (pending) + 19,466,450 + 756,000 (paid)
+    // Bill 183420 (1,770,000) order-nya ada di payment history → uang sudah
+    // masuk, dibuang dari belumTerbayar (portal memang masih menampilkan
+    // barisnya). Bill 183999 (500,000) belum ada di history → tetap dihitung.
+    // 2,050,800 (billable) + 500,000 + 20,222,450 (history) = 22,773,250
     expect(rekap.bisaDitagih).toBe(2050800);
-    expect(rekap.prosesPembayaran).toBe(1770000);
+    expect(rekap.belumTerbayar).toBe(500000);
     expect(rekap.sudahDibayar).toBe(20222450);
-    expect(rekap.omzet).toBe(24043250);
+    expect(rekap.omzet).toBe(22773250);
   });
 
   it("status bayar order mengikuti prioritas terbayar > pending > billable", () => {
@@ -506,5 +559,128 @@ describe("rekap & peta pembayaran", () => {
   it("order yang hanya punya tagihan pending = pending", () => {
     const peta = petaBayarDari([], bills, []);
     expect(statusBayarOrder("183420", peta)).toBe("pending");
+  });
+});
+
+describe("listsRentangDari", () => {
+  it("includes both range boundaries and excludes dates outside the range", () => {
+    const hasil = listsRentangDari(
+      [
+        { orderId: "before", customer: "A", deliveryDate: "2026-10-06", purpose: "", amount: "", amountValue: 1 },
+        { orderId: "start", customer: "A", deliveryDate: "2026-10-07 08:00:00", purpose: "", amount: "", amountValue: 1 },
+        { orderId: "end", customer: "A", deliveryDate: "2026-10-09", purpose: "", amount: "", amountValue: 1 },
+        { orderId: "after", customer: "A", deliveryDate: "2026-10-10", purpose: "", amount: "", amountValue: 1 },
+      ],
+      [
+        { billId: "before", orderId: "1", createdAt: "2026-10-06", processDate: "", paidDate: "", receivable: "", receivableValue: 1, status: "pending" },
+        { billId: "start", orderId: "2", createdAt: "2026-10-07 08:00:00", processDate: "", paidDate: "", receivable: "", receivableValue: 1, status: "pending" },
+        { billId: "end", orderId: "3", createdAt: "2026-10-09", processDate: "", paidDate: "", receivable: "", receivableValue: 1, status: "pending" },
+        { billId: "after", orderId: "4", createdAt: "2026-10-10", processDate: "", paidDate: "", receivable: "", receivableValue: 1, status: "pending" },
+      ],
+      [
+        { id: "before", processDate: "", paidDate: "2026-10-06", total: "", totalValue: 1, bank: "", orderIds: [] },
+        { id: "start", processDate: "", paidDate: "2026-10-07 08:00:00", total: "", totalValue: 1, bank: "", orderIds: [] },
+        { id: "end", processDate: "", paidDate: "2026-10-09", total: "", totalValue: 1, bank: "", orderIds: [] },
+        { id: "after", processDate: "", paidDate: "2026-10-10", total: "", totalValue: 1, bank: "", orderIds: [] },
+      ],
+      "2026-10-07",
+      "2026-10-09",
+    );
+
+    expect(hasil.billables.map((x) => x.orderId)).toEqual(["start", "end"]);
+    expect(hasil.bills.map((x) => x.billId)).toEqual(["start", "end"]);
+    expect(hasil.history.map((x) => x.id)).toEqual(["start", "end"]);
+  });
+
+  it("ignores rows with empty or invalid bucket dates", () => {
+    const hasil = listsRentangDari(
+      [
+        { orderId: "empty", customer: "A", deliveryDate: "", purpose: "", amount: "", amountValue: 1 },
+        { orderId: "invalid", customer: "A", deliveryDate: "not-a-date", purpose: "", amount: "", amountValue: 1 },
+      ],
+      [
+        { billId: "empty", orderId: "1", createdAt: "", processDate: "", paidDate: "", receivable: "", receivableValue: 1, status: "pending" },
+      ],
+      [
+        { id: "empty", processDate: "", paidDate: "", total: "", totalValue: 1, bank: "", orderIds: [] },
+      ],
+      "2026-10-07",
+      "2026-10-09",
+    );
+
+    expect(hasil).toEqual({ billables: [], bills: [], history: [] });
+  });
+
+  it("buang bill yang order-nya sudah masuk payment history", () => {
+    const hasil = listsRentangDari(
+      [],
+      [
+        { billId: "paid", orderId: "42", createdAt: "2026-10-07", processDate: "", paidDate: "", receivable: "", receivableValue: 5, status: "pending" },
+        { billId: "open", orderId: "43", createdAt: "2026-10-08", processDate: "", paidDate: "", receivable: "", receivableValue: 7, status: "pending" },
+      ],
+      [
+        { id: "p", processDate: "", paidDate: "2026-10-09", total: "", totalValue: 5, bank: "", orderIds: ["42"] },
+      ],
+      "2026-10-07",
+      "2026-10-09",
+    );
+
+    // Kedua bill di dalam rentang, tapi yang order-nya terbayar dibuang —
+    // tab Tagihan hanya berisi piutang yang belum masuk rekening.
+    expect(hasil.bills.map((x) => x.billId)).toEqual(["open"]);
+    expect(hasil.history.map((x) => x.id)).toEqual(["p"]);
+  });
+});
+
+describe("parseProductsPage", () => {
+  it("extracts product columns from a portal table", () => {
+    const products = parseProductsPage(PROD_PAGE);
+    expect(products).toHaveLength(1);
+    expect(products[0]).toEqual({
+      id: "1001",
+      name: "Nasi Goreng",
+      category: "Makanan",
+      price: "Rp. 35,000",
+      cogs: "Rp. 20,000",
+      status: "Aktif",
+      createdAt: "2026-09-01",
+    });
+  });
+
+  it("filters out rows with non-numeric id", () => {
+    const html = `<table><tbody>
+      ${PROD_ROW}
+      <tr><td>header</td><td>Not a product</td><td>-</td><td>-</td><td>-</td><td>-</td><td>-</td></tr>
+    </tbody></table>`;
+    expect(parseProductsPage(html)).toHaveLength(1);
+  });
+
+  it("returns empty for page without tbody", () => {
+    expect(parseProductsPage("<html></html>")).toEqual([]);
+  });
+});
+
+describe("parseProductDetail", () => {
+  it("maps labeled fields from the first section", () => {
+    const detail = parseProductDetail(PROD_DETAIL_SECTION, "42");
+    expect(detail).not.toBeNull();
+    expect(detail!.name).toBe("Soto Ayam");
+    expect(detail!.supplier).toBe("PT Supplier");
+    expect(detail!.price).toBe("Rp. 40,000");
+    expect(detail!.description).toBe("Soto ayam dengan kuah kuning");
+    expect(detail!.preOrderDays).toBe("0");
+    expect(detail!.tags).toBe("halal, soto");
+    expect(detail!.createdAt).toBe("2026-08-15");
+  });
+
+  it("falls back to empty string for missing fields", () => {
+    const detail = parseProductDetail("<section><ul></ul></section>", "1");
+    expect(detail).not.toBeNull();
+    expect(detail!.name).toBe("");
+    expect(detail!.supplier).toBe("");
+  });
+
+  it("returns null when there are no sections", () => {
+    expect(parseProductDetail("<div></div>", "1")).toBeNull();
   });
 });

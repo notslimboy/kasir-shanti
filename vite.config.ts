@@ -21,6 +21,7 @@ import {
   handleItsfoodAccept,
   handleItsfoodGet,
   handleItsfoodPayments,
+  handleItsfoodProducts,
 } from "./src/server/itsfood-server";
 
 function itsfoodMiddleware(): Plugin {
@@ -52,7 +53,9 @@ function itsfoodMiddleware(): Plugin {
                 ? await handleItsfoodAccept(request)
                 : url.pathname === "/payments"
                   ? await handleItsfoodPayments(request)
-                  : await handleItsfoodGet(url);
+                  : url.pathname === "/products"
+                    ? await handleItsfoodProducts(request)
+                    : await handleItsfoodGet(url);
 
             res.statusCode = response.status;
             res.setHeader("Content-Type", "application/json");

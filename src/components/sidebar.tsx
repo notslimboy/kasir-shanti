@@ -37,8 +37,9 @@ const NAV: readonly NavItem[] = [
      tetap tampil di mobile: dari HP data order justru paling sering
      dicek. */
   { id: "itsfood-dash", label: "Dasbor Itsfood", tip: "Dasbor", icon: "chart" },
-  { id: "itsfood", label: "Order Itsfood", tip: "Order", icon: "truck" },
+  { id: "itsfood-orders", label: "Order Itsfood", tip: "Order", icon: "truck" },
   { id: "itsfood-pay", label: "Payment Itsfood", tip: "Payment", icon: "banknote" },
+  { id: "itsfood-produk", label: "Produk Itsfood", tip: "Produk", icon: "box" },
   { id: "pengaturan", label: "Pengaturan", icon: "cog" },
 ] as const;
 

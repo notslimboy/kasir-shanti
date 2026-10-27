@@ -16,7 +16,7 @@
     "e2e:mobile": "playwright test --project=mobile",
     "e2e:ui": "playwright test --ui",
     "verify": "npm run typecheck && npm run test && npm run e2e",
-    "build:api": "esbuild src/server/api/orders.ts src/server/api/accept.ts src/server/api/payments.ts --bundle --platform=node --format=esm --outdir=api/itsfood --outbase=src/server/api --out-extension:.js=.js"
+    "build:api": "esbuild src/server/api/orders.ts src/server/api/accept.ts src/server/api/payments.ts src/server/api/products.ts --bundle --platform=node --format=esm --outdir=api/itsfood --outbase=src/server/api --out-extension:.js=.js"
   },
   "dependencies": {
     "@base-ui/react": "^1.9.0",

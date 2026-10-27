@@ -14,7 +14,7 @@ import { ChartDonut, type MetodePembayaran } from "@/components/chart-donut";
 import { CHART_ANIM } from "@/components/chart-motion";
 import { ChartTip } from "@/components/chart-tip";
 import { BadgeBank } from "@/components/itsfood-bank";
-import { Card, CardTitle } from "@/components/ui/card";
+import { Card, CardTitle, Pill } from "@/components/ui/card";
 import { KpiCard } from "@/components/kpi-card";
 import { Toast, useToast } from "@/components/ui/toast";
 import { getAccessToken } from "@/supabase/client";
@@ -23,6 +23,7 @@ import {
   isoDari,
   omzetDuaPeriodeDari,
   rekapPeriodeDari,
+  labelStatusBill,
   tanggalPendekItsfood,
   trenOmzetHarian,
   type ItsfoodBill,
@@ -169,17 +170,22 @@ export function ItsfoodDashboardPage() {
   /* Donut komposisi omzet dalam periode terpilih. */
   const komposisi = useMemo<MetodePembayaran[]>(() => {
     if (!kpi) return [];
-    const { omzet, bisaDitagih, prosesPembayaran, sudahDibayar } = kpi.rekap;
+    const { omzet, bisaDitagih, belumTerbayar, sudahDibayar } = kpi.rekap;
     if (omzet === 0) return [];
     return [
       { name: "Sudah Dibayar", total: sudahDibayar, pct: Math.round((sudahDibayar / omzet) * 100) },
-      { name: "Proses Pembayaran", total: prosesPembayaran, pct: Math.round((prosesPembayaran / omzet) * 100) },
+      { name: "Belum Terbayar", total: belumTerbayar, pct: Math.round((belumTerbayar / omzet) * 100) },
       { name: "Bisa Ditagih", total: bisaDitagih, pct: Math.round((bisaDitagih / omzet) * 100) },
     ].filter((x) => x.total > 0);
   }, [kpi]);
 
   const pembayaranTerakhir = useMemo(
-    () => (data ? [...data.history].sort((a, b) => b.paidDate.localeCompare(a.paidDate)).slice(0, 6) : []),
+    () => (data ? [...data.history].sort((a, b) => b.paidDate.localeCompare(a.paidDate)).slice(0, 10) : []),
+    [data],
+  );
+
+  const tagihanTerakhir = useMemo(
+    () => (data ? [...data.bills].sort((a, b) => b.createdAt.localeCompare(a.createdAt)).slice(0, 10) : []),
     [data],
   );
 
@@ -244,9 +250,9 @@ export function ItsfoodDashboardPage() {
           icon={IcoBill}
         />
         <KpiCard
-          label="Proses Pembayaran"
-          value={rupiah(kpi?.rekap.prosesPembayaran ?? 0)}
-          sub={`${kpi?.rekap.nBills ?? 0} tagihan`}
+          label="Belum Terbayar"
+          value={rupiah(kpi?.rekap.belumTerbayar ?? 0)}
+          sub={`${kpi?.rekap.nBelumTerbayar ?? 0} tagihan belum masuk rekening Shanti`}
           icon={IcoClock}
         />
         <KpiCard
@@ -370,48 +376,92 @@ export function ItsfoodDashboardPage() {
         </Card>
       </div>
 
-      {/* Pembayaran terakhir — pengganti "Struk Terbaru" di beranda. */}
-      <Card
-        title={<CardTitle>Pembayaran Terakhir</CardTitle>}
-        action={
-          <button
-            onClick={() => nav("/itsfood-tagihan")}
-            className="rounded-full bg-primary px-3.5 py-1.5 text-xs font-bold text-primary-foreground transition-opacity hover:opacity-90"
-          >
-            Lihat Semua
-          </button>
-        }
-      >
-        {pembayaranTerakhir.length === 0 ? (
-          <p className="py-6 text-center text-sm text-muted-foreground">
-            Belum ada pembayaran masuk.
-          </p>
-        ) : (
-          <ul>
-            {pembayaranTerakhir.map((h) => (
-              <li
-                key={h.id}
-                className="flex items-center justify-between gap-3 border-b border-[#EEF4DE] py-2.5 last:border-b-0 dark:border-border/60"
-              >
-                <div className="min-w-0">
-                  <div className="flex flex-wrap items-center gap-2">
-                    <p className="text-sm font-medium">
-                      {tanggalPendekItsfood(h.paidDate)}
+      {/* Pembayaran terakhir + Tagihan terakhir — berdampingan. */}
+      <div className="grid gap-4 lg:grid-cols-2">
+        <Card
+          title={<CardTitle>Pembayaran Terakhir</CardTitle>}
+          action={
+            <button
+              onClick={() => nav("/itsfood-tagihan?tab=history")}
+              className="rounded-full bg-primary px-3.5 py-1.5 text-xs font-bold text-primary-foreground transition-opacity hover:opacity-90"
+            >
+              Lihat Semua
+            </button>
+          }
+        >
+          {pembayaranTerakhir.length === 0 ? (
+            <p className="py-6 text-center text-sm text-muted-foreground">
+              Belum ada pembayaran masuk.
+            </p>
+          ) : (
+            <ul className="max-h-[420px] overflow-y-auto">
+              {pembayaranTerakhir.map((h) => (
+                <li
+                  key={h.id}
+                  className="flex items-center justify-between gap-3 border-b border-[#EEF4DE] py-2.5 last:border-b-0 dark:border-border/60"
+                >
+                  <div className="min-w-0">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <p className="text-sm font-medium">
+                        {tanggalPendekItsfood(h.paidDate)}
+                      </p>
+                      {h.bank && <BadgeBank bank={h.bank} />}
+                    </div>
+                    <p className="mt-0.5 text-xs text-muted-foreground">
+                      {h.orderIds.length} order lunas
                     </p>
-                    {h.bank && <BadgeBank bank={h.bank} />}
                   </div>
-                  <p className="mt-0.5 text-xs text-muted-foreground">
-                    {h.orderIds.length} order lunas
-                  </p>
-                </div>
-                <span className="shrink-0 text-sm font-semibold tabular-nums">
-                  {rupiah(h.totalValue)}
-                </span>
-              </li>
-            ))}
-          </ul>
-        )}
-      </Card>
+                  <span className="shrink-0 text-sm font-semibold tabular-nums">
+                    {rupiah(h.totalValue)}
+                  </span>
+                </li>
+              ))}
+            </ul>
+          )}
+        </Card>
+
+        <Card
+          title={<CardTitle>Tagihan Terakhir</CardTitle>}
+          action={
+            <button
+              onClick={() => nav("/itsfood-tagihan?tab=bills")}
+              className="rounded-full bg-primary px-3.5 py-1.5 text-xs font-bold text-primary-foreground transition-opacity hover:opacity-90"
+            >
+              Lihat Semua
+            </button>
+          }
+        >
+          {tagihanTerakhir.length === 0 ? (
+            <p className="py-6 text-center text-sm text-muted-foreground">
+              Belum ada tagihan.
+            </p>
+          ) : (
+            <ul className="max-h-[420px] overflow-y-auto">
+              {tagihanTerakhir.map((b) => (
+                <li
+                  key={b.billId}
+                  className="flex items-center justify-between gap-3 border-b border-[#EEF4DE] py-2.5 last:border-b-0 dark:border-border/60"
+                >
+                  <div className="min-w-0">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <p className="text-sm font-medium">#{b.orderId}</p>
+                      <Pill tone={labelStatusBill(b.status).tone}>
+                        {labelStatusBill(b.status).label}
+                      </Pill>
+                    </div>
+                    <p className="mt-0.5 text-xs text-muted-foreground">
+                      {tanggalPendekItsfood(b.createdAt)}
+                    </p>
+                  </div>
+                  <span className="shrink-0 text-sm font-semibold tabular-nums">
+                    {b.receivable}
+                  </span>
+                </li>
+              ))}
+            </ul>
+          )}
+        </Card>
+      </div>
 
       <Toast toast={toast} posisi="atas-tengah" />
     </div>

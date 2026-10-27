@@ -26,6 +26,8 @@ import {
   parseOrderDetail,
   parseOrdersPage,
   parsePaymentDetail,
+  parseProductDetail,
+  parseProductsPage,
   petaBayarDari,
   rekapPembayaranDari,
   type ItsfoodBill,
@@ -34,6 +36,8 @@ import {
   type ItsfoodOrderDetail,
   type ItsfoodPaymentDetail,
   type ItsfoodPaymentHistory,
+  type ItsfoodProduct,
+  type ItsfoodProductDetail,
   type PetaBayarOrder,
   type RekapPembayaran,
 } from "../lib/itsfood";
@@ -225,6 +229,7 @@ const TTL_PAYMENTS = 5 * 60_000; // billables/bills/history
 
 const cacheOrders = new Map<string, EntriCache<ItsfoodOrder[]>>();
 let cachePayments: EntriCache<DataPembayaran> | undefined;
+let cacheProducts: EntriCache<{ products: ItsfoodProduct[] }> | undefined;
 
 /** Baca cache dengan pola stale-while-revalidate:
     - masih segar      → data langsung, tanpa sentuh portal
@@ -453,7 +458,16 @@ export interface DataPembayaran {
 /** Ketiga halaman payments sekaligus — satu session, tiga scrape PARALEL
     (GET dengan cookie yang sama aman diparalel; halaman dalam satu daftar
     tetap berurutan karena butuh kondisi berhenti). History paling panjang,
-    makanya cap-nya paling besar. */
+    makanya cap-nya paling besar.
+
+    Cap = batas keras halaman, bukan target. scrapePaginated berhenti di
+    halaman yang barisnya < 10, jadi cap hanya melindungi dari loop tak
+    berujung. Diangkat ke sini supaya seluruh riwayat 2025–2026 ikut
+    tertarik (sebelumnya bills mentok 20 hal = 200 baris, terpotong). */
+const MAX_PAGES_BILLABLES = 20;
+const MAX_PAGES_BILLS = 100;
+const MAX_PAGES_HISTORY = 150;
+
 export async function ambilPayments(): Promise<{
   data: DataPembayaran;
   stale: boolean;
@@ -470,9 +484,9 @@ export async function ambilPayments(): Promise<{
 async function scrapePayments(): Promise<DataPembayaran> {
   return withSession(async (session) => {
     const [billables, bills, history] = await Promise.all([
-      scrapePaginated(session, `${BASE}/payments/billables`, parseBillablesPage, 10),
-      scrapePaginated(session, `${BASE}/payments/bills`, parseBillsPage, 20),
-      scrapePaginated(session, `${BASE}/payments/history`, parseHistoryPage, 30),
+      scrapePaginated(session, `${BASE}/payments/billables`, parseBillablesPage, MAX_PAGES_BILLABLES),
+      scrapePaginated(session, `${BASE}/payments/bills`, parseBillsPage, MAX_PAGES_BILLS),
+      scrapePaginated(session, `${BASE}/payments/history`, parseHistoryPage, MAX_PAGES_HISTORY),
     ]);
     return {
       billables,
@@ -505,6 +519,101 @@ export async function ambilDetailPayment(
     if (!detail) throw new ItsfoodError(`Detail pembayaran #${paymentId} tidak terbaca`, 502);
     return detail;
   });
+}
+
+/* ------------------------------------------------------------------ */
+/* Products — list + detail                                            */
+/* ------------------------------------------------------------------ */
+
+const MAX_PAGES_PRODUCTS = 50;
+
+async function scrapeProducts(): Promise<{ products: ItsfoodProduct[] }> {
+  return withSession(async (session) => {
+    const products = await scrapePaginated(
+      session, `${BASE}/products`, parseProductsPage, MAX_PAGES_PRODUCTS,
+    );
+    return { products };
+  });
+}
+
+/** Cached product list, stale-while-revalidate. */
+export async function ambilProduk(): Promise<{
+  data: { products: ItsfoodProduct[] };
+  stale: boolean;
+  umurDetik: number;
+}> {
+  return denganCache(
+    cacheProducts,
+    (e) => void (cacheProducts = e),
+    TTL_PAYMENTS,
+    scrapeProducts,
+  );
+}
+
+/** Uncached product detail. */
+export async function ambilDetailProduk(
+  productId: string,
+): Promise<ItsfoodProductDetail> {
+  return withSession(async (session) => {
+    const res = await fetch(
+      `${BASE}/products/product/${encodeURIComponent(productId)}`,
+      {
+        headers: { "User-Agent": UA, Cookie: cookieHeader(session.jar) },
+        cache: "no-store",
+        redirect: "manual",
+      },
+    );
+    if (res.status >= 300 && res.status < 400) {
+      throw new ItsfoodError("SESSION_EXPIRED");
+    }
+    if (!res.ok) {
+      throw new ItsfoodError(
+        `Produk #${productId} tidak bisa dibuka (HTTP ${res.status})`,
+        404,
+      );
+    }
+    const html = await res.text();
+    if (html.length === 0 || html.includes("Login - Itsfood")) {
+      throw new ItsfoodError("SESSION_EXPIRED");
+    }
+    const detail = parseProductDetail(html, productId);
+    if (!detail) {
+      throw new ItsfoodError(`Detail produk #${productId} tidak terbaca`, 502);
+    }
+    return detail;
+  });
+}
+
+/** GET handler — ?id=N → detail, else → list. */
+export async function handleItsfoodProducts(req: Request): Promise<Response> {
+  const url = new URL(req.url, "https://placeholder.local");
+  const id = url.searchParams.get("id");
+  if (id) {
+    try {
+      return json({ ok: true, detail: await ambilDetailProduk(id) });
+    } catch (e) {
+      const err = e instanceof ItsfoodError ? e : null;
+      return json(
+        { ok: false, error: err?.message ?? "Gagal mengambil detail produk" },
+        err?.status ?? 502,
+      );
+    }
+  }
+  try {
+    const { data, stale, umurDetik } = await ambilProduk();
+    return json({
+      ok: true,
+      products: data.products,
+      stale,
+      umurDetik,
+    });
+  } catch (e) {
+    const err = e instanceof ItsfoodError ? e : null;
+    return json(
+      { ok: false, error: err?.message ?? "Gagal mengambil daftar produk" },
+      err?.status ?? 502,
+    );
+  }
 }
 
 /** Buat tagihan dari satu order di billables — pola verifikasi sama

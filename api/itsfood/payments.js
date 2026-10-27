@@ -88,12 +88,12 @@ function petaBayarDari(billables, bills, history) {
 }
 function rekapPembayaranDari(billables, bills, history) {
   const bisaDitagih = billables.reduce((a, b) => a + b.amountValue, 0);
-  const prosesPembayaran = bills.reduce((a, b) => a + b.receivableValue, 0);
+  const belumTerbayar = bills.filter((b) => !/cancel|reject/i.test(b.status)).reduce((a, b) => a + b.receivableValue, 0);
   const sudahDibayar = history.reduce((a, h) => a + h.totalValue, 0);
   return {
-    omzet: bisaDitagih + prosesPembayaran + sudahDibayar,
+    omzet: bisaDitagih + belumTerbayar + sudahDibayar,
     bisaDitagih,
-    prosesPembayaran,
+    belumTerbayar,
     sudahDibayar
   };
 }
@@ -263,6 +263,9 @@ async function scrapePaginated(session, path, parse, maxPages) {
   }
   return out;
 }
+var MAX_PAGES_BILLABLES = 20;
+var MAX_PAGES_BILLS = 100;
+var MAX_PAGES_HISTORY = 150;
 async function ambilPayments() {
   return denganCache(
     cachePayments,
@@ -274,9 +277,9 @@ async function ambilPayments() {
 async function scrapePayments() {
   return withSession(async (session) => {
     const [billables, bills, history] = await Promise.all([
-      scrapePaginated(session, `${BASE}/payments/billables`, parseBillablesPage, 10),
-      scrapePaginated(session, `${BASE}/payments/bills`, parseBillsPage, 20),
-      scrapePaginated(session, `${BASE}/payments/history`, parseHistoryPage, 30)
+      scrapePaginated(session, `${BASE}/payments/billables`, parseBillablesPage, MAX_PAGES_BILLABLES),
+      scrapePaginated(session, `${BASE}/payments/bills`, parseBillsPage, MAX_PAGES_BILLS),
+      scrapePaginated(session, `${BASE}/payments/history`, parseHistoryPage, MAX_PAGES_HISTORY)
     ]);
     return {
       billables,

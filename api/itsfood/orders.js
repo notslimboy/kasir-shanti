@@ -44,6 +44,18 @@ function parseOrderDetail(html, id) {
   if (!sections || sections.length === 0) return null;
   const fields = parseLabeledFields(sections[0]);
   const items = sections[1] ? parseItemsSection(sections[1]) : [];
+  const ambilField = (...kandidat) => {
+    for (const k of kandidat) {
+      if (fields[k]) return fields[k];
+    }
+    const keys = Object.keys(fields);
+    for (const k of kandidat) {
+      const kl = k.toLowerCase();
+      const hit = keys.find((kk) => kk.toLowerCase().includes(kl));
+      if (hit && fields[hit]) return fields[hit];
+    }
+    return "";
+  };
   return {
     id,
     pemesan: fields["Pemesan"] ?? "",
@@ -54,6 +66,8 @@ function parseOrderDetail(html, id) {
     waktuPemesanan: fields["Waktu Pemesanan"] ?? "",
     waktuPengantaran: fields["Waktu Pengantaran"] ?? "",
     tujuan: fields["Tujuan Pemesanan"] ?? "",
+    orderCost: ambilField("Order Cost", "Biaya Order", "Total Order", "Order Amount", "Cost"),
+    serviceCharge: ambilField("Service Charge", "Biaya Layanan", "Biaya Jasa", "Service Fee", "Charge"),
     catatan: fields["Catatan"] ?? "",
     items
   };

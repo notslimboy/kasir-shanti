@@ -1220,8 +1220,15 @@ function IsiDetailOrder({
           ["Waktu Pemesanan", detail.waktuPemesanan],
           ["Waktu Pengantaran", detail.waktuPengantaran],
           ["Tujuan", detail.tujuan],
+          ["Order Cost", detail.orderCost || "-"],
+          ["Service Charge", detail.serviceCharge || "-"],
         ] as [string, string][]
-      ).filter(([, v]) => v && v !== "-")
+      ).filter(([, v], i) => {
+        // 6 field pertama: sembunyikan kalau kosong/"-".
+        // Order Cost & Service Charge: selalu tampil (fallback "-").
+        if (i >= 6) return true;
+        return Boolean(v) && v !== "-";
+      })
     : [];
 
   return (

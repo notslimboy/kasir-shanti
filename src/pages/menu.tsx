@@ -9,6 +9,7 @@ import type { Product, Variant } from "@/lib/menu-seed";
 import { useData } from "@/lib/data-source";
 import { ItemDaftar } from "@/components/list-motion";
 import { InputRupiah } from "@/components/ui/input-rupiah";
+import { SheetBawah } from "@/components/ui/sheet-bawah";
 import { tandaiProdukStale } from "@/lib/data-source-signal";
 import { resetSyncHash, syncProductsFromGoogleSheet } from "@/lib/sync-google-sheet";
 import { TANPA_KATEGORI, buatClientId, simpanProduk } from "@/lib/simpan-produk";
@@ -58,6 +59,15 @@ export function MenuPage() {
      benar-benar muncul di katalog — kalau ditutup duluan, daftar di kiri
      akan sesaat kehilangan produk barunya sendiri. */
   const [baruTersimpan, setBaruTersimpan] = useState<string | null>(null);
+  const [isMobile, setIsMobile] = useState(false);
+
+  useEffect(() => {
+    const media = window.matchMedia("(max-width: 1279px)");
+    const update = () => setIsMobile(media.matches);
+    update();
+    media.addEventListener("change", update);
+    return () => media.removeEventListener("change", update);
+  }, []);
 
   useEffect(
     () => () => {
@@ -318,184 +328,11 @@ export function MenuPage() {
   const removeVariant = (clientId: string) =>
     patch((p) => ({ ...p, variants: p.variants.filter((v) => v.client_id !== clientId) }));
 
-  return (
-    <div>
-      <PageHeader
-        title="Kelola Menu"
-        sub="Atur produk, varian (cara jual), harga, dan stok."
-        action={
-          <div className="flex items-center gap-2">
-            <IconButton
-              onClick={sinkronkan}
-              disabled={menyinkron}
-              label={menyinkron ? "Menyinkron dari Google Sheet" : "Tarik produk terbaru dari Google Sheet"}
-              title={hasilSinkron ?? "Tarik produk terbaru dari Google Sheet"}
-            >
-              {/* Berputar saat synkron — itu satu-satunya penanda bahwa
-                  synkron benar-benar jalan; hasil sync baru tampil setelah
-                  selesai, jadi tanpa ini tombolnya diam seperti macet. */}
-              <svg
-                viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.75}
-                strokeLinecap="round" strokeLinejoin="round"
-                className={`h-[18px] w-[18px] ${menyinkron ? "animate-spin" : ""}`}
-                aria-hidden="true"
-              >
-                <path d="M21 12a9 9 0 1 1-3.5-7.1" />
-                <path d="M21 4v5h-5" />
-              </svg>
-            </IconButton>
-            {/* Satu draf saja: kalau masih ada yang belum tersimpan, tombol ini
-                tidak membuat produk kosong kedua — dia hanya memunculkan draf
-                itu lagi. */}
-            <button
-              onClick={menuBaru}
-              disabled={menyimpan || (sel !== null && draf.has(sel))}
-              title={draf.size > 0 ? "Kembali ke menu baru yang belum disimpan" : "Buat menu baru"}
-              className={btnPrimary + " disabled:opacity-40"}
-            >
-              + Menu Baru
-            </button>
-          </div>
-        }
-      />
-
-      {/* Hasil synkron: dismissed sendiri supaya tidak jadi baris yang
-          menetap di halaman. Error tidak ikut hilang — itu yang perlu
-          dibaca kalau Sheet gagal diambil. */}
-      {hasilSinkron && (
-        <p
-          role="status"
-          className={`-mt-2 mb-3 text-sm ${hasilSinkron.startsWith("Gagal") ? "text-destructive" : "text-muted-foreground"}`}
-        >
-          {hasilSinkron}
-        </p>
-      )}
-
-      {dihapus && (
-        <p className="-mt-1 mb-3 text-sm text-muted-foreground">
-          Dihapus dari aplikasi karena sudah tidak ada di sheet:{" "}
-          <span className="text-foreground">{dihapus.join(", ")}</span>
-        </p>
-      )}
-
-      {/* Kolom tetap. Kalau tidak ada produk yang dipilih, sisi kanan memang
-          sengaja dibiarkan kosong — bukan Diretas jadi grid kartu. */}
-      <div className="grid gap-4 xl:grid-cols-[minmax(0,340px)_minmax(0,1fr)]">
-        {/* ---------- DAFTAR ---------- */}
-        <div className="min-w-0">
-          <div className="mb-3 space-y-2">
-            <input
-              value={q}
-              onChange={(e) => setQ(e.target.value)}
-              placeholder="Cari menu atau SKU…"
-              className={inputClass}
-            />
-            <Tabs
-              value={cat}
-              onChange={setCat}
-              items={[{ id: "semua", label: "Semua", count: items.length }, ...opsiKategori.map((c) => ({ id: c, label: c }))]}
-            />
-          </div>
-
-          {/* popLayout: baris yang hilang tidak menahan baris lain di
-              tempatnya. Tanpa itu, mengetik di kotak cari terasa seperti
-              daftar didorong, bukan difilter. */}
-          <div className="space-y-2">
-            <AnimatePresence initial={false} mode="popLayout">
-            {list.map((p, i) => {
-              const n = p.variants.find((v) => v.is_default);
-              const on = p.client_id === sel;
-              /* Draf belum ada nama dan belum ada harga. Tanpa label, baris
-                 itu terlihat seperti menu sungguhan yang rusak — bukan
-                 sesuatu yang sengaja menunggu diisi. */
-              const drafIni = draf.has(p.client_id);
-              return (
-                <ItemDaftar key={p.client_id} i={i} aktif={geser}>
-                <button
-                  onClick={() => setSel(p.client_id)}
-                  className={
-                    "w-full rounded-2xl p-3.5 text-left transition-all " +
-                    (on
-                      ? "bg-sidebar text-sidebar-foreground shadow-card ring-2 ring-primary"
-                      : "bg-card shadow-card hover:bg-accent/40")
-                  }
-                >
-                  <div className="flex items-start justify-between gap-2">
-                    <div className="min-w-0">
-                      <div className="truncate text-sm font-semibold">
-                        {drafIni ? "Menu baru — belum disimpan" : p.name}
-                      </div>
-                      <div className={"truncate text-xs " + (on ? "text-sidebar-foreground/60" : "text-muted-foreground")}>
-                        {/* Sebagian besar produk nyata belum punya SKU —
-                            pemisah "·" harus ikut disembunyikan kalau tidak
-                            ada isi di sebelah kirinya. */}
-                        {drafIni ? "Isi nama & kategori, lalu Simpan" : p.sku ? `${p.sku} · ${p.category}` : p.category}
-                      </div>
-                    </div>
-                    <div className="shrink-0 text-right">
-                      <div className="text-sm font-bold figure">
-                        {drafIni ? "—" : rupiah(n?.price ?? 0)}
-                      </div>
-                      <div className={"text-[11px] " + (on ? "text-sidebar-foreground/60" : "text-muted-foreground")}>
-                        {drafIni ? "belum ada harga" : p.stock_unlimited ? "tanpa batas" : `sisa ${p.stock}`}
-                      </div>
-                    </div>
-                  </div>
-                  <div className="mt-2 flex flex-wrap gap-1">
-                    {p.variants.slice(0, 4).map((v) => (
-                      <span
-                        key={v.client_id}
-                        className={
-                          "rounded-md border px-1.5 py-0.5 text-[10px] font-semibold " +
-                          (on ? "border-white/15 text-sidebar-foreground/75" : "border-input text-muted-foreground")
-                        }
-                      >
-                        {v.name}
-                      </span>
-                    ))}
-                    {p.variants.length > 4 && (
-                      <span className={"text-[10px] " + (on ? "text-sidebar-foreground/50" : "text-muted-foreground")}>
-                        +{p.variants.length - 4}
-                      </span>
-                    )}
-                  </div>
-                </button>
-                </ItemDaftar>
-              );
-            })}
-            </AnimatePresence>
-            {list.length === 0 && (
-              <div className="grid place-items-center rounded-2xl border border-dashed border-input py-12 text-center">
-                <p className="text-sm font-semibold text-muted-foreground">
-                  {live.produkMemuat
-                    ? "Memuat menu…"
-                    : live.produk.length === 0
-                      ? live.produkDimuat
-                        ? "Belum ada menu — tekan “+ Menu Baru” untuk menambah"
-                        : "Menu belum dimuat"
-                      : "Menu tidak ditemukan"}
-                </p>
-              </div>
-            )}
-          </div>
-        </div>
-
-        {/* ---------- EDITOR (hanya saat ada produk terpilih) ---------- */}
-        <AnimatePresence mode="wait" initial={false}>
-        {product && (() => {
-          const normal = product.variants.find((v) => v.is_default);
-          return (
-          <motion.div
-            key={product.client_id}
-            /* Masuk: sedikit meluncur dari kanan. Keluar: cepat dan tegas.
-               Spring untuk keluar terasa seperti nge-lag, jadi keluar pakai
-               durasi pendek. */
-            initial={{ opacity: 0, x: 24 }}
-            animate={{ opacity: 1, x: 0 }}
-            exit={{ opacity: 0, x: 24 }}
-            transition={{ duration: 0.18, ease: [0.32, 0.72, 0, 1] }}
-            className="min-w-0 space-y-4"
-          >
+  const editorContent = product
+    ? (() => {
+        const normal = product.variants.find((v) => v.is_default);
+        return (
+          <div className="min-w-0 space-y-4 xl:sticky xl:top-20">
           <Card
             title={product.name}
             action={
@@ -791,23 +628,196 @@ export function MenuPage() {
             )}
           </Card>
 
-          {/* ---------- ADD-ON ---------- */}
-          <Card title="Add-on" action={<Pill>Segera</Pill>}>
-            <div className="rounded-2xl border border-dashed border-input p-6 text-center">
-              <p className="text-sm font-semibold">Belum dipakai</p>
-              <p className="mx-auto mt-1 max-w-md text-xs text-muted-foreground">
-                Tambahan seperti extra nasi, telur, atau level sambal akan muncul di layar Kasir sebagai pilihan
-                terpisah dari varian harga. Gratis, dan tidak memengaruhi aturan harga separuh.
-              </p>
-              <button disabled className="mt-3 rounded-full border border-input px-4 h-9 text-sm font-semibold text-muted-foreground opacity-60">
-                Aktifkan nanti
-              </button>
-            </div>
-          </Card>
-          </motion.div>
-          );
-        })()}
+          {/* Add-on sengaja tidak ditampilkan — fiturnya belum dipakai;
+              komponennya tinggal dipasang kembali saat dibutuhkan. */}
+          </div>
+        );
+      })()
+    : null;
+
+  return (
+    <div>
+      <PageHeader
+        title="Kelola Menu"
+        sub="Atur produk, varian (cara jual), harga, dan stok."
+        action={
+          <div className="flex items-center gap-2">
+            <IconButton
+              onClick={sinkronkan}
+              disabled={menyinkron}
+              label={menyinkron ? "Menyinkron dari Google Sheet" : "Tarik produk terbaru dari Google Sheet"}
+              title={hasilSinkron ?? "Tarik produk terbaru dari Google Sheet"}
+            >
+              {/* Berputar saat synkron — itu satu-satunya penanda bahwa
+                  synkron benar-benar jalan; hasil sync baru tampil setelah
+                  selesai, jadi tanpa ini tombolnya diam seperti macet. */}
+              <svg
+                viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.75}
+                strokeLinecap="round" strokeLinejoin="round"
+                className={`h-[18px] w-[18px] ${menyinkron ? "animate-spin" : ""}`}
+                aria-hidden="true"
+              >
+                <path d="M21 12a9 9 0 1 1-3.5-7.1" />
+                <path d="M21 4v5h-5" />
+              </svg>
+            </IconButton>
+            {/* Satu draf saja: kalau masih ada yang belum tersimpan, tombol ini
+                tidak membuat produk kosong kedua — dia hanya memunculkan draf
+                itu lagi. */}
+            <button
+              onClick={menuBaru}
+              disabled={menyimpan || (sel !== null && draf.has(sel))}
+              title={draf.size > 0 ? "Kembali ke menu baru yang belum disimpan" : "Buat menu baru"}
+              className={btnPrimary + " disabled:opacity-40"}
+            >
+              + Menu Baru
+            </button>
+          </div>
+        }
+      />
+
+      {/* Hasil synkron: dismissed sendiri supaya tidak jadi baris yang
+          menetap di halaman. Error tidak ikut hilang — itu yang perlu
+          dibaca kalau Sheet gagal diambil. */}
+      {hasilSinkron && (
+        <p
+          role="status"
+          className={`-mt-2 mb-3 text-sm ${hasilSinkron.startsWith("Gagal") ? "text-destructive" : "text-muted-foreground"}`}
+        >
+          {hasilSinkron}
+        </p>
+      )}
+
+      {dihapus && (
+        <p className="-mt-1 mb-3 text-sm text-muted-foreground">
+          Dihapus dari aplikasi karena sudah tidak ada di sheet:{" "}
+          <span className="text-foreground">{dihapus.join(", ")}</span>
+        </p>
+      )}
+
+      {/* Kolom tetap. Kalau tidak ada produk yang dipilih, sisi kanan memang
+          sengaja dibiarkan kosong — bukan Diretas jadi grid kartu. */}
+      <div className="grid gap-4 xl:grid-cols-[minmax(0,340px)_minmax(0,1fr)]">
+        {/* ---------- DAFTAR ---------- */}
+        <div className="min-w-0">
+          <div className="mb-3 space-y-2">
+            <input
+              value={q}
+              onChange={(e) => setQ(e.target.value)}
+              placeholder="Cari menu atau SKU…"
+              className={inputClass}
+            />
+            <Tabs
+              value={cat}
+              onChange={setCat}
+              items={[{ id: "semua", label: "Semua", count: items.length }, ...opsiKategori.map((c) => ({ id: c, label: c }))]}
+            />
+          </div>
+
+          {/* popLayout: baris yang hilang tidak menahan baris lain di
+              tempatnya. Tanpa itu, mengetik di kotak cari terasa seperti
+              daftar didorong, bukan difilter. */}
+          <div className="space-y-2">
+            <AnimatePresence initial={false} mode="popLayout">
+            {list.map((p, i) => {
+              const n = p.variants.find((v) => v.is_default);
+              const on = p.client_id === sel;
+              /* Draf belum ada nama dan belum ada harga. Tanpa label, baris
+                 itu terlihat seperti menu sungguhan yang rusak — bukan
+                 sesuatu yang sengaja menunggu diisi. */
+              const drafIni = draf.has(p.client_id);
+              return (
+                <ItemDaftar key={p.client_id} i={i} aktif={geser}>
+                <button
+                  onClick={() => setSel(p.client_id)}
+                  className={
+                    "w-full rounded-2xl p-3.5 text-left transition-all " +
+                    (on
+                      ? "bg-sidebar text-sidebar-foreground shadow-card ring-2 ring-primary"
+                      : "bg-card shadow-card hover:bg-accent/40")
+                  }
+                >
+                  <div className="flex items-start justify-between gap-2">
+                    <div className="min-w-0">
+                      <div className="truncate text-sm font-semibold">
+                        {drafIni ? "Menu baru — belum disimpan" : p.name}
+                      </div>
+                      <div className={"truncate text-xs " + (on ? "text-sidebar-foreground/60" : "text-muted-foreground")}>
+                        {/* Sebagian besar produk nyata belum punya SKU —
+                            pemisah "·" harus ikut disembunyikan kalau tidak
+                            ada isi di sebelah kirinya. */}
+                        {drafIni ? "Isi nama & kategori, lalu Simpan" : p.sku ? `${p.sku} · ${p.category}` : p.category}
+                      </div>
+                    </div>
+                    <div className="shrink-0 text-right">
+                      <div className="text-sm font-bold figure">
+                        {drafIni ? "—" : rupiah(n?.price ?? 0)}
+                      </div>
+                      <div className={"text-[11px] " + (on ? "text-sidebar-foreground/60" : "text-muted-foreground")}>
+                        {drafIni ? "belum ada harga" : p.stock_unlimited ? "tanpa batas" : `sisa ${p.stock}`}
+                      </div>
+                    </div>
+                  </div>
+                  <div className="mt-2 flex flex-wrap gap-1">
+                    {p.variants.slice(0, 4).map((v) => (
+                      <span
+                        key={v.client_id}
+                        className={
+                          "rounded-md border px-1.5 py-0.5 text-[10px] font-semibold " +
+                          (on ? "border-white/15 text-sidebar-foreground/75" : "border-input text-muted-foreground")
+                        }
+                      >
+                        {v.name}
+                      </span>
+                    ))}
+                    {p.variants.length > 4 && (
+                      <span className={"text-[10px] " + (on ? "text-sidebar-foreground/50" : "text-muted-foreground")}>
+                        +{p.variants.length - 4}
+                      </span>
+                    )}
+                  </div>
+                </button>
+                </ItemDaftar>
+              );
+            })}
+            </AnimatePresence>
+            {list.length === 0 && (
+              <div className="grid place-items-center rounded-2xl border border-dashed border-input py-12 text-center">
+                <p className="text-sm font-semibold text-muted-foreground">
+                  {live.produkMemuat
+                    ? "Memuat menu…"
+                    : live.produk.length === 0
+                      ? live.produkDimuat
+                        ? "Belum ada menu — tekan “+ Menu Baru” untuk menambah"
+                        : "Menu belum dimuat"
+                      : "Menu tidak ditemukan"}
+                </p>
+              </div>
+            )}
+          </div>
+        </div>
+
+        {/* ---------- EDITOR (hanya saat ada produk terpilih) ---------- */}
+        <AnimatePresence mode="wait" initial={false}>
+          {!isMobile && product && (
+            <motion.div
+              key={product.client_id}
+              /* Masuk: sedikit meluncur dari kanan. Keluar: cepat dan tegas.
+                 Spring untuk keluar terasa seperti nge-lag, jadi keluar pakai
+                 durasi pendek. */
+              initial={{ opacity: 0, x: 24 }}
+              animate={{ opacity: 1, x: 0 }}
+              exit={{ opacity: 0, x: 24 }}
+              transition={{ duration: 0.18, ease: [0.32, 0.72, 0, 1] }}
+              className="min-w-0"
+            >
+              {editorContent}
+            </motion.div>
+          )}
         </AnimatePresence>
+        <SheetBawah open={isMobile && !!product} onClose={batal} title={product?.name} maxH="92dvh">
+          {editorContent}
+        </SheetBawah>
       </div>
     </div>
   );

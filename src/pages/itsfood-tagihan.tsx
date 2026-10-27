@@ -1,11 +1,13 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useSearchParams } from "react-router-dom";
 
 import { Card, Pill } from "@/components/ui/card";
 import { Modal } from "@/components/ui/modal";
 import { Toast, useToast } from "@/components/ui/toast";
 import { Memuat } from "@/components/ui/memuat";
 import { PageHeader, Tabs } from "@/components/ui/kit";
-import { RekapPembayaranStrip } from "@/components/itsfood-rekap";
+import { labelRentang, type DateRange } from "@/components/ui/date-range";
+import { RekapPembayaranStrip, type OpsiPeriodeRekap } from "@/components/itsfood-rekap";
 import { BadgeBank } from "@/components/itsfood-bank";
 import {
   SortableTh,
@@ -22,7 +24,10 @@ import type {
   RekapPembayaran,
 } from "@/lib/itsfood";
 import {
+  LABEL_PERIODE_REKAP,
+  isoDari,
   labelStatusBill,
+  listsRentangDari,
   tanggalJamPendek,
   tanggalPendekItsfood,
 } from "@/lib/itsfood";
@@ -115,7 +120,25 @@ async function apiDetailPayment(paymentId: string): Promise<ItsfoodPaymentDetail
 }
 
 export function ItsfoodTagihanPage() {
-  const [tab, setTab] = useState<Tab>("billables");
+  const [searchParams, setSearchParams] = useSearchParams();
+const tabFromUrl = searchParams.get("tab");
+const initialTab: Tab =
+  tabFromUrl === "billables" || tabFromUrl === "bills" || tabFromUrl === "history"
+    ? (tabFromUrl as Tab)
+    : "billables";
+const [tab, setTab] = useState<Tab>(initialTab);
+
+useEffect(() => {
+  const t = searchParams.get("tab");
+  if (
+    (t === "billables" || t === "bills" || t === "history") &&
+    t !== tab
+  ) {
+    setTab(t as Tab);
+  }
+}, [searchParams, tab]);
+  const [periode, setPeriode] = useState<OpsiPeriodeRekap>("bulan");
+  const [rentang, setRentang] = useState<DateRange | null>(null);
   const [data, setData] = useState<DataPayments | null>(() => bacaPaymentsValid());
   const [memuat, setMemuat] = useState(() => !bacaPaymentsValid());
   const [galat, setGalat] = useState("");
@@ -125,6 +148,42 @@ export function ItsfoodTagihanPage() {
   const [detail, setDetail] = useState<ItsfoodPaymentDetail | null>(null);
   const [detailMemuat, setDetailMemuat] = useState(false);
   const [toast, setToast] = useToast();
+
+  const hariIni = isoDari(new Date());
+  const rentangDefault = useMemo<DateRange>(() => {
+    const sampai = new Date(hariIni);
+    const dari = new Date(hariIni);
+    dari.setDate(dari.getDate() - 6);
+    return { from: dari, to: sampai };
+  }, [hariIni]);
+  const jendela = useMemo(() => {
+    if (periode === "custom") {
+      const aktif = rentang ?? rentangDefault;
+      return {
+        dari: isoDari(aktif.from),
+        sampai: isoDari(aktif.to),
+        label: labelRentang(aktif),
+      };
+    }
+    const dari = new Date(hariIni);
+    if (periode === "7hari") dari.setDate(dari.getDate() - 6);
+    if (periode === "bulan") dari.setDate(1);
+    return {
+      dari: isoDari(dari),
+      sampai: hariIni,
+      label: LABEL_PERIODE_REKAP[periode],
+    };
+  }, [hariIni, periode, rentang, rentangDefault]);
+  const lists = useMemo(
+    () => data && listsRentangDari(
+      data.billables,
+      data.bills,
+      data.history,
+      jendela.dari,
+      jendela.sampai,
+    ),
+    [data, jendela],
+  );
 
   const muat = useCallback(async (paksa = false) => {
     setGalat("");
@@ -209,6 +268,12 @@ export function ItsfoodTagihanPage() {
             billables={data.billables}
             bills={data.bills}
             history={data.history}
+            periode={periode}
+            rentang={rentang}
+            rentangDefault={rentangDefault}
+            jendela={jendela}
+            onPeriodeChange={setPeriode}
+            onRentangChange={setRentang}
           />
         ) : (
           <p className="py-2 text-center text-sm text-muted-foreground">
@@ -218,28 +283,42 @@ export function ItsfoodTagihanPage() {
       </Card>
 
       <Card>
-        <Tabs
-          items={[
-            { id: "billables", label: "Bisa Ditagih", count: data?.billables.length },
-            { id: "bills", label: "Bills", count: data?.bills.length },
-            { id: "history", label: "Sudah Dibayar", count: data?.history.length },
-          ]}
-          value={tab}
-          onChange={(id) => setTab(id as Tab)}
-        />
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <Tabs
+            items={[
+              { id: "billables", label: "Siap Ditagih", count: lists?.billables.length },
+              { id: "bills", label: "Tagihan", count: lists?.bills.length },
+              { id: "history", label: "Sudah Dibayar", count: lists?.history.length },
+            ]}
+            value={tab}
+            onChange={(id) => {
+              const t = id as Tab;
+              setTab(t);
+              setSearchParams({ tab: t }, { replace: true });
+            }}
+          />
+          <span className="rounded-full bg-muted px-3 py-1 text-xs font-medium text-muted-foreground">
+            {jendela.label}
+          </span>
+        </div>
 
         <div className="mt-4">
-          {!data ? (
+          {!data || !lists ? (
             <p className="py-8 text-center text-sm text-muted-foreground">
               {memuat ? "Menarik data pembayaran dari portal…" : "Tidak ada data"}
             </p>
           ) : tab === "billables" ? (
-            <DaftarBillables list={data.billables} onTagih={setKonfirmasi} />
+            <DaftarBillables
+              list={lists.billables}
+              onTagih={setKonfirmasi}
+              resetKey={`${jendela.dari}|${jendela.sampai}`}
+            />
           ) : tab === "bills" ? (
-            <DaftarBills list={data.bills} />
+            <DaftarBills list={lists.bills} resetKey={`${jendela.dari}|${jendela.sampai}`} />
           ) : (
             <DaftarHistory
-              list={data.history}
+              list={lists.history}
+              resetKey={`${jendela.dari}|${jendela.sampai}`}
               onDetail={(h) => {
                 setDetail(null);
                 setDetailMemuat(true);
@@ -333,7 +412,7 @@ export function ItsfoodTagihanPage() {
                       </p>
                     </div>
                     <span className="shrink-0 font-semibold tabular-nums">
-                      {rupiah(b.payableValue)}
+                      {b.payable}
                     </span>
                   </li>
                 ))}
@@ -421,15 +500,17 @@ function waktuRingkas(t: string, acuan?: string): string {
 function DaftarBillables({
   list,
   onTagih,
+  resetKey,
 }: {
   list: ItsfoodBillable[];
   onTagih: (b: ItsfoodBillable) => void;
+  resetKey: string;
 }) {
-  const { ref, terlihat, selesai } = useTahap(list.length);
+  const { ref, terlihat, selesai } = useTahap(list.length, resetKey);
   if (list.length === 0) {
     return (
       <p className="py-8 text-center text-sm text-muted-foreground">
-        Tidak ada order yang bisa ditagih sekarang.
+        Tidak ada order yang bisa ditagih di rentang ini.
       </p>
     );
   }
@@ -451,7 +532,7 @@ function DaftarBillables({
             </div>
             <div className="flex shrink-0 items-center gap-3">
               <span className="text-sm font-bold tabular-nums">
-                {rupiah(b.amountValue)}
+                {b.amount}
               </span>
               <button
                 onClick={() => onTagih(b)}
@@ -472,14 +553,16 @@ function DaftarBillables({
 /* Daftar: Bills                                                       */
 /* ------------------------------------------------------------------ */
 
+/* "Lunas di Itsfood" tidak jadi chip filter: bill yang order-nya sudah
+   masuk payment history dibuang dari daftar ini (uangnya sudah terhitung
+   di tab Sudah Dibayar), jadi chip untuk status itu cuma redundant. */
 const FILTER_STATUS = [
   "semua",
-  "Menunggu Pembayaran",
-  "Diproses",
-  "Terbayar",
+  "Belum Bayar",
+  "Diverifikasi",
 ] as const;
 
-function DaftarBills({ list }: { list: ItsfoodBill[] }) {
+function DaftarBills({ list, resetKey }: { list: ItsfoodBill[]; resetKey: string }) {
   const { urutan, toggle } = useUrutan();
   const [cari, setCari] = useState("");
   const [status, setStatus] = useState<(typeof FILTER_STATUS)[number]>("semua");
@@ -504,12 +587,12 @@ function DaftarBills({ list }: { list: ItsfoodBill[] }) {
     [tersaring, urutan],
   );
 
-  const { ref, terlihat, selesai } = useTahap(terurut.length, `${cari}|${status}`);
+  const { ref, terlihat, selesai } = useTahap(terurut.length, `${resetKey}|${cari}|${status}`);
 
   if (list.length === 0) {
     return (
       <p className="py-8 text-center text-sm text-muted-foreground">
-        Tidak ada tagihan berjalan.
+        Tidak ada tagihan di rentang ini.
       </p>
     );
   }
@@ -595,7 +678,7 @@ function DaftarBills({ list }: { list: ItsfoodBill[] }) {
                       {b.paidDate !== "-" ? waktuRingkas(b.paidDate, b.createdAt) : "—"}
                     </td>
                     <td className="py-3 text-right font-bold tabular-nums">
-                      {rupiah(b.receivableValue)}
+                      {b.receivable}
                     </td>
                     <td className="py-3 text-right">
                       <Pill tone={st.tone}>{st.label}</Pill>
@@ -620,7 +703,7 @@ function DaftarBills({ list }: { list: ItsfoodBill[] }) {
                   <div className="flex items-center justify-between gap-x-3">
                     <p className="text-sm font-bold tabular-nums">#{b.orderId}</p>
                     <span className="text-sm font-bold tabular-nums">
-                      {rupiah(b.receivableValue)}
+                      {b.receivable}
                     </span>
                   </div>
                   <div className="mt-1.5 flex flex-wrap items-center gap-x-2 gap-y-1">
@@ -659,15 +742,17 @@ function DaftarBills({ list }: { list: ItsfoodBill[] }) {
 function DaftarHistory({
   list,
   onDetail,
+  resetKey,
 }: {
   list: ItsfoodPaymentHistory[];
   onDetail: (h: ItsfoodPaymentHistory) => void;
+  resetKey: string;
 }) {
-  const { ref, terlihat, selesai } = useTahap(list.length);
+  const { ref, terlihat, selesai } = useTahap(list.length, resetKey);
   if (list.length === 0) {
     return (
       <p className="py-8 text-center text-sm text-muted-foreground">
-        Belum ada pembayaran masuk.
+        Tidak ada pembayaran masuk di rentang ini.
       </p>
     );
   }
@@ -689,7 +774,7 @@ function DaftarHistory({
                 <p className="text-sm font-bold tabular-nums">#{h.id}</p>
                 <span className="flex shrink-0 items-center gap-1.5">
                   <span className="text-sm font-bold tabular-nums">
-                    {rupiah(h.totalValue)}
+                    {h.total}
                   </span>
                   <span aria-hidden="true" className="text-muted-foreground">
                     ›

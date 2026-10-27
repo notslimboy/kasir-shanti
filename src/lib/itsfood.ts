@@ -53,6 +53,10 @@ export interface ItsfoodOrderDetail {
   /** "2026-10-27 11:00:00" */
   waktuPengantaran: string;
   tujuan: string;
+  /** Biaya order dari portal (jika ada), kosong kalau tidak ada. */
+  orderCost: string;
+  /** Service charge dari portal (jika ada), kosong kalau tidak ada. */
+  serviceCharge: string;
   /** Catatan bebas dari pemesan — sering kosong, itu normal. */
   catatan: string;
   items: ItsfoodItem[];
@@ -150,6 +154,20 @@ export function parseOrderDetail(html: string, id: string): ItsfoodOrderDetail |
   const fields = parseLabeledFields(sections[0]);
   const items = sections[1] ? parseItemsSection(sections[1]) : [];
 
+  const ambilField = (...kandidat: string[]): string => {
+    for (const k of kandidat) {
+      if (fields[k]) return fields[k];
+    }
+    // fallback: label yang mengandung kata kunci (case-insensitive)
+    const keys = Object.keys(fields);
+    for (const k of kandidat) {
+      const kl = k.toLowerCase();
+      const hit = keys.find((kk) => kk.toLowerCase().includes(kl));
+      if (hit && fields[hit]) return fields[hit];
+    }
+    return "";
+  };
+
   return {
     id,
     pemesan: fields["Pemesan"] ?? "",
@@ -160,6 +178,8 @@ export function parseOrderDetail(html: string, id: string): ItsfoodOrderDetail |
     waktuPemesanan: fields["Waktu Pemesanan"] ?? "",
     waktuPengantaran: fields["Waktu Pengantaran"] ?? "",
     tujuan: fields["Tujuan Pemesanan"] ?? "",
+    orderCost: ambilField("Order Cost", "Biaya Order", "Total Order", "Order Amount", "Cost"),
+    serviceCharge: ambilField("Service Charge", "Biaya Layanan", "Biaya Jasa", "Service Fee", "Charge"),
     catatan: fields["Catatan"] ?? "",
     items,
   };
@@ -256,7 +276,15 @@ function rowsFromTbody(html: string): string[][] {
   for (const row of rows) {
     const cells = row.match(/<t[dh][^>]*>([\s\S]*?)<\/t[dh]>/g) ?? [];
     out.push(
-      cells.map((c) => stripTags(c.replace(/<div class="lg:hidden[^>]*>[^<]*<\/div>/, ""))),
+      cells.map((c) =>
+        stripTags(
+          c
+            // buang label mobile (div/span dengan class lg:hidden), termasuk
+            // yang isinya bukan teks polos (mis. "#" pada kolom ID)
+            .replace(/<(div|span)\b[^>]*\blg:hidden\b[^>]*>[\s\S]*?<\/\1>/g, "")
+            .replace(/<div class="lg:hidden[^>]*>[^<]*<\/div>/g, ""),
+        ),
+      ),
     );
   }
   return out;
@@ -328,11 +356,10 @@ export function parseHistoryPage(html: string): ItsfoodPaymentHistory[] {
 /* ------------------------------------------------------------------ */
 
 export interface RekapPembayaran {
-  /** Bisa ditagih + tagihan berjalan + terbayar. */
   omzet: number;
   bisaDitagih: number;
-  /** Tagihan sudah dibuat, belum dibayar (status pending di /bills). */
-  prosesPembayaran: number;
+  /** Tagihan di tab Tagihan yang belum masuk rekening Shanti. */
+  belumTerbayar: number;
   sudahDibayar: number;
 }
 
@@ -345,6 +372,13 @@ export interface PetaBayarOrder {
   terbayar: Set<string>;
 }
 
+/** Order IDs whose payment already entered the history list — the basis
+    for "money has arrived at Shanti's account". Shared by the payment map
+    and the bill filters so every consumer applies the same rule. */
+function terbayarDari(history: ItsfoodPaymentHistory[]): Set<string> {
+  return new Set(history.flatMap((h) => h.orderIds));
+}
+
 export function petaBayarDari(
   billables: ItsfoodBillable[],
   bills: ItsfoodBill[],
@@ -353,7 +387,7 @@ export function petaBayarDari(
   return {
     bisaDitagih: new Set(billables.map((b) => b.orderId)),
     tagihanPending: new Map(bills.map((b) => [b.orderId, b])),
-    terbayar: new Set(history.flatMap((h) => h.orderIds)),
+    terbayar: terbayarDari(history),
   };
 }
 
@@ -375,12 +409,20 @@ export function rekapPembayaranDari(
   history: ItsfoodPaymentHistory[],
 ): RekapPembayaran {
   const bisaDitagih = billables.reduce((a, b) => a + b.amountValue, 0);
-  const prosesPembayaran = bills.reduce((a, b) => a + b.receivableValue, 0);
+  // "Belum Terbayar" = tagihan yang uangnya BELUM masuk rekening Shanti.
+  // Cancelled/rejected tidak dihitung (bukan piutang riil). Bill yang
+  // order-nya sudah masuk payment history juga dibuang — portal tetap
+  // menampilkan barisnya setelah uang masuk, dan menghitungnya di sini
+  // berarti dobel hitung dengan sudahDibayar. Selaras dengan tab Tagihan.
+  const terbayar = terbayarDari(history);
+  const belumTerbayar = bills
+    .filter((b) => !/cancel|reject/i.test(b.status) && !terbayar.has(b.orderId))
+    .reduce((a, b) => a + b.receivableValue, 0);
   const sudahDibayar = history.reduce((a, h) => a + h.totalValue, 0);
   return {
-    omzet: bisaDitagih + prosesPembayaran + sudahDibayar,
+    omzet: bisaDitagih + belumTerbayar + sudahDibayar,
     bisaDitagih,
-    prosesPembayaran,
+    belumTerbayar,
     sudahDibayar,
   };
 }
@@ -420,24 +462,63 @@ export function dalamPeriodeIso(
 }
 
 /** Sumbangan ketiga keranjang untuk satu rentang tanggal (inklusif). */
+export function listsRentangDari(
+  billables: ItsfoodBillable[],
+  bills: ItsfoodBill[],
+  history: ItsfoodPaymentHistory[],
+  dariIso: string,
+  sampaiIso: string,
+): {
+  billables: ItsfoodBillable[];
+  bills: ItsfoodBill[];
+  history: ItsfoodPaymentHistory[];
+} {
+  const dalamRentang = (tanggal: string) => {
+    const x = tanggal.slice(0, 10);
+    return /^\d{4}-\d{2}-\d{2}$/.test(x) && x >= dariIso && x <= sampaiIso;
+  };
+  // Bill yang order-nya sudah masuk payment history dibuang: uangnya sudah
+  // masuk rekening Shanti, jadi bukan lagi piutang berjalan (portal tetap
+  // menampilkan barisnya). Tab Tagihan dan rekap otomatis selaras karena
+  // keduanya lewat fungsi ini.
+  const terbayar = terbayarDari(history);
+  return {
+    billables: billables.filter((x) => dalamRentang(x.deliveryDate)),
+    bills: bills.filter(
+      (x) => dalamRentang(x.createdAt) && !terbayar.has(x.orderId),
+    ),
+    history: history.filter((x) => dalamRentang(x.paidDate)),
+  };
+}
+
 export function rekapRentangDari(
   billables: ItsfoodBillable[],
   bills: ItsfoodBill[],
   history: ItsfoodPaymentHistory[],
   dariIso: string,
   sampaiIso: string,
-): RekapPembayaran & { nBillables: number; nBills: number; nHistory: number } {
-  const f = (t: string) => {
-    const x = t.slice(0, 10);
-    return /^\d{4}-\d{2}-\d{2}$/.test(x) && x >= dariIso && x <= sampaiIso;
-  };
-  const b = billables.filter((x) => f(x.deliveryDate));
-  const l = bills.filter((x) => f(x.createdAt));
-  const h = history.filter((x) => f(x.paidDate));
+): RekapPembayaran & { nBillables: number; nBelumTerbayar: number; nHistory: number } {
+  const { billables: b, bills: l, history: h } = listsRentangDari(
+    billables,
+    bills,
+    history,
+    dariIso,
+    sampaiIso,
+  );
+  const bisaDitagih = b.reduce((a, x) => a + x.amountValue, 0);
+  const sudahDibayar = h.reduce((a, x) => a + x.totalValue, 0);
+  // "Belum Terbayar" = semua bill di rentang (kecuali cancelled/rejected),
+  // selaras dengan tab Tagihan. Tidak difilter status/terbayar, supaya
+  // total kartu sama dengan total tab.
+  const belumTerbayarBills = l.filter((x) => !/cancel|reject/i.test(x.status));
+  const belumTerbayar = belumTerbayarBills.reduce((a, x) => a + x.receivableValue, 0);
   return {
-    ...rekapPembayaranDari(b, l, h),
+    omzet: bisaDitagih + belumTerbayar + sudahDibayar,
+    bisaDitagih,
+    belumTerbayar,
+    sudahDibayar,
     nBillables: b.length,
-    nBills: l.length,
+    nBelumTerbayar: belumTerbayarBills.length,
     nHistory: h.length,
   };
 }
@@ -449,7 +530,7 @@ export function rekapPeriodeDari(
   history: ItsfoodPaymentHistory[],
   periode: PeriodeRekap,
   hariIniIso: string,
-): RekapPembayaran & { nBillables: number; nBills: number; nHistory: number } {
+): RekapPembayaran & { nBillables: number; nBelumTerbayar: number; nHistory: number } {
   const dari = new Date(hariIniIso);
   if (periode === "7hari") dari.setDate(dari.getDate() - 6);
   if (periode === "bulan") dari.setDate(1);
@@ -579,6 +660,81 @@ export function linkWa(no: string): string | null {
 }
 
 /* ------------------------------------------------------------------ */
+/* Products — list + detail                                            */
+/* ------------------------------------------------------------------ */
+
+export interface ItsfoodProduct {
+  id: string;
+  name: string;
+  category: string;
+  price: string;
+  cogs: string;
+  status: string;
+  createdAt: string;
+}
+
+export interface ItsfoodProductDetail {
+  id: string;
+  name: string;
+  supplier: string;
+  category: string;
+  status: string;
+  description: string;
+  createdAt: string;
+  price: string;
+  cogs: string;
+  minOrder: string;
+  maxOrder: string;
+  preOrderDays: string;
+  preOrderHours: string;
+  tags: string;
+}
+
+/** /products page → array of products. Columns: ID, Name, Category,
+    Price, COGS, Status, Created At. Filter rows where id matches /^\d+$/. */
+export function parseProductsPage(html: string): ItsfoodProduct[] {
+  return rowsFromTbody(html)
+    .map((cells) => {
+      const id = (cells[0] ?? "").match(/(\d+)/)?.[1] ?? "";
+      if (!id) return null;
+      return {
+        id,
+        name: (cells[1] ?? "").replace(/^(Nama|Name):\s*/i, "").trim(),
+        category: (cells[2] ?? "").replace(/^(Kategori|Category):\s*/i, "").trim(),
+        price: (cells[3] ?? "").replace(/^(Harga|Price):\s*/i, "").trim(),
+        cogs: (cells[4] ?? "").replace(/^(COGS|HPP):\s*/i, "").trim(),
+        status: (cells[5] ?? "").replace(/^(Status):\s*/i, "").trim(),
+        createdAt: (cells[6] ?? "").replace(/^(Created At|Dibuat):\s*/i, "").trim(),
+      };
+    })
+    .filter((x): x is ItsfoodProduct => x !== null);
+}
+
+/** /products/product/:id → detail. Uses parseLabeledFields on the first
+    section. Field labels mapped to canonical keys. */
+export function parseProductDetail(html: string, id: string): ItsfoodProductDetail | null {
+  const sections = html.match(/<section[^>]*>([\s\S]*?)<\/section>/g);
+  if (!sections || sections.length === 0) return null;
+  const fields = parseLabeledFields(sections[0]);
+  return {
+    id,
+    name: fields["Nama"] ?? "",
+    supplier: fields["Supplier"] ?? "",
+    category: fields["Kategori"] ?? "",
+    status: fields["Status"] ?? "",
+    description: fields["Description"] ?? "",
+    createdAt: fields["Created at"] ?? "",
+    price: fields["Harga"] ?? "",
+    cogs: fields["COGS"] ?? "",
+    minOrder: fields["Min Order"] ?? "",
+    maxOrder: fields["Max Order"] ?? "",
+    preOrderDays: fields["Pre Order Days"] ?? "",
+    preOrderHours: fields["Pre Order Hours"] ?? "",
+    tags: fields["Tags"] ?? "",
+  };
+}
+
+/* ------------------------------------------------------------------ */
 /* Teks ringkasan order untuk WhatsApp                                 */
 /* ------------------------------------------------------------------ */
 
@@ -627,9 +783,9 @@ export function labelStatusBill(
   status: string,
 ): { label: string; tone: "success" | "warning" | "neutral" } {
   const s = status.toLowerCase();
-  if (s.includes("paid")) return { label: "Terbayar", tone: "success" };
-  if (s.includes("process")) return { label: "Diproses", tone: "neutral" };
-  if (s.includes("pending")) return { label: "Menunggu Pembayaran", tone: "warning" };
+  if (s.includes("paid")) return { label: "Lunas di Itsfood", tone: "success" };
+  if (s.includes("process")) return { label: "Diverifikasi", tone: "neutral" };
+  if (s.includes("pending")) return { label: "Belum Bayar", tone: "warning" };
   if (s.includes("cancel") || s.includes("reject"))
     return { label: "Dibatalkan", tone: "neutral" };
   return { label: status, tone: "neutral" };
@@ -650,8 +806,13 @@ export function trenOmzetHarian(
     const k = t.slice(0, 10);
     perTanggal.set(k, (perTanggal.get(k) ?? 0) + v);
   };
+  const terbayar = terbayarDari(history);
   for (const b of billables) tambah(b.deliveryDate, b.amountValue);
-  for (const b of bills) tambah(b.createdAt, b.receivableValue);
+  // Bill yang order-nya sudah di history tidak dihitung lagi di sini —
+  // uang yang sama sudah dihitung dari bucket history pada paidDate-nya.
+  for (const b of bills) {
+    if (!terbayar.has(b.orderId)) tambah(b.createdAt, b.receivableValue);
+  }
   for (const h of history) tambah(h.paidDate, h.totalValue);
 
   const hari = new Date(hariIniIso);
