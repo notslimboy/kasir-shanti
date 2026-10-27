@@ -676,21 +676,17 @@ function DaftarHistory({
       <ul className="space-y-2.5">
         {list.slice(0, terlihat).map((h) => (
           <li key={h.id}>
-            {/* Seluruh kartu tombol — afordans "bisa dibuka" lewat hover
-                + chevron. Layout dua baris yang TETAP: baris 1 = tanggal +
-                bank kiri, total kanan; baris 2 = jumlah order. Flex-wrap
-                yang memindah-mindahkan total itu yang bikin berantakan. */}
+            {/* Seluruh kartu tombol — pola visual sama dengan kartu Bills:
+                #id kiri + rupiah kanan, pill bank, lalu baris meta. Afordans
+                "bisa dibuka" di chevron + hover; daftar order panjang tetap
+                terbaca lewat title. Dibayar vs "N order lunas" dipisah dua
+                baris supaya tanggal tidak menabrak daftar id. */}
             <button
               onClick={() => onDetail(h)}
               className="w-full rounded-2xl border border-border/60 bg-background p-3 text-left transition-colors hover:border-primary/60"
             >
               <div className="flex items-center justify-between gap-x-3">
-                <div className="flex min-w-0 items-center gap-2">
-                  <p className="text-sm font-bold">
-                    {tanggalPendekItsfood(h.paidDate)}
-                  </p>
-                  {h.bank && <BadgeBank bank={h.bank} />}
-                </div>
+                <p className="text-sm font-bold tabular-nums">#{h.id}</p>
                 <span className="flex shrink-0 items-center gap-1.5">
                   <span className="text-sm font-bold tabular-nums">
                     {rupiah(h.totalValue)}
@@ -700,8 +696,18 @@ function DaftarHistory({
                   </span>
                 </span>
               </div>
+              <div className="mt-1.5 flex flex-wrap items-center gap-x-2 gap-y-1">
+                {h.bank ? (
+                  <BadgeBank bank={h.bank} />
+                ) : (
+                  <Pill tone="success">Lunas</Pill>
+                )}
+                <span className="text-xs text-muted-foreground">
+                  dibayar {tanggalJamPendek(h.paidDate)}
+                </span>
+              </div>
               <p
-                className="mt-1 text-xs text-muted-foreground"
+                className="mt-0.5 text-xs text-muted-foreground"
                 title={h.orderIds.map((id) => `#${id}`).join(", ")}
               >
                 {h.orderIds.length} order lunas

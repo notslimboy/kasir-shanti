@@ -1057,10 +1057,11 @@ function RingkasanHarian({
                             <>
                               <p className="font-bold tabular-nums">#{order.id}</p>
                               <PillAntar jam={order.deliveryTime} />
-                              <p className="mt-1 break-words text-[11px] leading-snug text-muted-foreground">
-                                {order.customer}
-                                {alamat && <> · 📍 {alamat}</>}
-                              </p>
+                              {alamat && (
+                                <p className="mt-1 break-words text-[11px] leading-snug text-muted-foreground">
+                                  📍 {alamat}
+                                </p>
+                              )}
                             </>
                           )}
                         </td>
@@ -1101,10 +1102,11 @@ function RingkasanHarian({
                   <span className="text-sm font-bold tabular-nums">#{order.id}</span>
                   <PillAntar jam={order.deliveryTime} />
                 </div>
-                <p className="mb-1.5 break-words text-[11px] leading-snug text-muted-foreground">
-                  {order.customer}
-                  {alamat && <> · 📍 {alamat}</>}
-                </p>
+                {alamat && (
+                  <p className="mb-1.5 break-words text-[11px] leading-snug text-muted-foreground">
+                    📍 {alamat}
+                  </p>
+                )}
                 <ul>
                   {detail.items.map((it, i) => (
                     <li
