@@ -25,7 +25,11 @@ function rowsFromTbody(html) {
   for (const row of rows) {
     const cells = row.match(/<t[dh][^>]*>([\s\S]*?)<\/t[dh]>/g) ?? [];
     out.push(
-      cells.map((c) => stripTags(c.replace(/<div class="lg:hidden[^>]*>[^<]*<\/div>/, "")))
+      cells.map(
+        (c) => stripTags(
+          c.replace(/<(div|span)\b[^>]*\blg:hidden\b[^>]*>[\s\S]*?<\/\1>/g, "").replace(/<div class="lg:hidden[^>]*>[^<]*<\/div>/g, "")
+        )
+      )
     );
   }
   return out;
@@ -79,16 +83,20 @@ function parseHistoryPage(html) {
     };
   }).filter((x) => x !== null);
 }
+function terbayarDari(history) {
+  return new Set(history.flatMap((h) => h.orderIds));
+}
 function petaBayarDari(billables, bills, history) {
   return {
     bisaDitagih: new Set(billables.map((b) => b.orderId)),
     tagihanPending: new Map(bills.map((b) => [b.orderId, b])),
-    terbayar: new Set(history.flatMap((h) => h.orderIds))
+    terbayar: terbayarDari(history)
   };
 }
 function rekapPembayaranDari(billables, bills, history) {
   const bisaDitagih = billables.reduce((a, b) => a + b.amountValue, 0);
-  const belumTerbayar = bills.filter((b) => !/cancel|reject/i.test(b.status)).reduce((a, b) => a + b.receivableValue, 0);
+  const terbayar = terbayarDari(history);
+  const belumTerbayar = bills.filter((b) => !/cancel|reject/i.test(b.status) && !terbayar.has(b.orderId)).reduce((a, b) => a + b.receivableValue, 0);
   const sudahDibayar = history.reduce((a, h) => a + h.totalValue, 0);
   return {
     omzet: bisaDitagih + belumTerbayar + sudahDibayar,

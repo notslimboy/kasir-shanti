@@ -21,23 +21,27 @@ function rowsFromTbody(html) {
   for (const row of rows) {
     const cells = row.match(/<t[dh][^>]*>([\s\S]*?)<\/t[dh]>/g) ?? [];
     out.push(
-      cells.map((c) => stripTags(c.replace(/<div class="lg:hidden[^>]*>[^<]*<\/div>/, "")))
+      cells.map(
+        (c) => stripTags(
+          c.replace(/<(div|span)\b[^>]*\blg:hidden\b[^>]*>[\s\S]*?<\/\1>/g, "").replace(/<div class="lg:hidden[^>]*>[^<]*<\/div>/g, "")
+        )
+      )
     );
   }
   return out;
 }
 function parseProductsPage(html) {
   return rowsFromTbody(html).map((cells) => {
-    const id = (cells[0] ?? "").replace(/^Id:\s*/i, "");
-    if (!/^\d+$/.test(id)) return null;
+    const id = (cells[0] ?? "").match(/(\d+)/)?.[1] ?? "";
+    if (!id) return null;
     return {
       id,
-      name: (cells[1] ?? "").replace(/^Nama:\s*/i, ""),
-      category: (cells[2] ?? "").replace(/^Kategori:\s*/i, ""),
-      price: (cells[3] ?? "").replace(/^Harga:\s*/i, ""),
-      cogs: (cells[4] ?? "").replace(/^COGS:\s*/i, ""),
-      status: (cells[5] ?? "").replace(/^Status:\s*/i, ""),
-      createdAt: (cells[6] ?? "").replace(/^Created At:\s*/i, "")
+      name: (cells[1] ?? "").replace(/^(Nama|Name):\s*/i, "").trim(),
+      category: (cells[2] ?? "").replace(/^(Kategori|Category):\s*/i, "").trim(),
+      price: (cells[3] ?? "").replace(/^(Harga|Price):\s*/i, "").trim(),
+      cogs: (cells[4] ?? "").replace(/^(COGS|HPP):\s*/i, "").trim(),
+      status: (cells[5] ?? "").replace(/^(Status):\s*/i, "").trim(),
+      createdAt: (cells[6] ?? "").replace(/^(Created At|Dibuat):\s*/i, "").trim()
     };
   }).filter((x) => x !== null);
 }
