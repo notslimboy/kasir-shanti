@@ -57,10 +57,11 @@ export function SheetBawah({
             className={cn(
               /* Base — sama dengan DrawerContent shadcn (punya arah vertikal
                  saja: variasi swipe-axis=x tidak dipakai di sini). */
-              "group/drawer-popup pointer-events-auto fixed z-50 m-(--drawer-inset,0px) flex h-(--drawer-content-height) min-h-0 w-(--drawer-content-width,auto) transform-[translate3d(var(--translate-x,0px),var(--translate-y,0px),0)_scale(var(--stack-scale))] flex-col transition-[transform,height,opacity,filter] duration-450 ease-[cubic-bezier(0.22,1,0.36,1)] will-change-transform outline-none select-none [interpolate-size:allow-keywords]",
+              "group/drawer-popup pointer-events-auto fixed z-50 m-(--drawer-inset,0px) flex h-(--drawer-content-height) max-h-(--drawer-content-max-height,none) min-h-0 w-(--drawer-content-width,auto) transform-[translate3d(var(--translate-x,0px),var(--translate-y,0px),0)_scale(var(--stack-scale))] flex-col transition-[transform,height,opacity,filter] duration-450 ease-[cubic-bezier(0.22,1,0.36,1)] will-change-transform outline-none select-none [interpolate-size:allow-keywords]",
               "data-nested-drawer-open:overflow-hidden data-nested-drawer-open:brightness-95",
-              /* Bleed — mengisi celah di bawah panel saat swipe overshoot. */
-              "after:pointer-events-none after:absolute after:inset-x-0 after:bottom-full after:h-(--bleed) after:bg-(--drawer-bleed-background,var(--color-popover))",
+              /* Bleed — mengisi celah saat panel tergeser; sisi strip ditentukan
+                 data-swipe-direction milik engine (bawah saat swipe down). */
+              "after:pointer-events-none after:absolute after:bg-(--drawer-bleed-background,var(--color-popover)) data-[swipe-axis=x]:after:inset-y-0 data-[swipe-axis=x]:after:w-(--bleed) data-[swipe-axis=y]:after:inset-x-0 data-[swipe-axis=y]:after:h-(--bleed) data-[swipe-direction=down]:after:top-full data-[swipe-direction=left]:after:right-full data-[swipe-direction=right]:after:left-full data-[swipe-direction=up]:after:bottom-full",
               /* Ukuran: isi menentukan tinggi, terkurung maxH. */
               "[--drawer-content-height:var(--drawer-height,auto)] data-snap-points:[--drawer-content-height:100dvh]",
               /* Var stack untuk formula swipe (sheet ini tidak nested,
