@@ -61,8 +61,12 @@ export default defineConfig({
        asserted in `vercel-rewrite.test.ts` instead. Running the real Vercel
        dev server per `npm run e2e` would add a network dependency and ~40s
        of startup to every run, and it executes the dev server rather than
-       the built output. */
-    command: "VITE_E2E_AUTH_BYPASS=1 npm run build && npx vite preview --port 4173 --strictPort --host localhost",
+       the built output. The env flag travels via the `env` field, not a
+       `VITE_..=1 cmd` shell prefix: that prefix only parses in POSIX
+       shells; this webServer runs in cmd.exe on Windows and would
+       exit 1 outright. */
+    command: "npm run build && npx vite preview --port 4173 --strictPort --host localhost",
+    env: { VITE_E2E_AUTH_BYPASS: "1" },
     url: "http://localhost:4173",
     reuseExistingServer: !process.env.CI,
     timeout: 180_000,

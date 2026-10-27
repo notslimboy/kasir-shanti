@@ -19,6 +19,7 @@
     "build:api": "esbuild src/server/api/orders.ts src/server/api/accept.ts src/server/api/payments.ts --bundle --platform=node --format=esm --outdir=api/itsfood --outbase=src/server/api --out-extension:.js=.js"
   },
   "dependencies": {
+    "@base-ui/react": "^1.9.0",
     "@supabase/supabase-js": "^2",
     "motion": "^13.4.6",
     "react": "^19",

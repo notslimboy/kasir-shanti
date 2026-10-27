@@ -1,8 +1,8 @@
 import { Fragment, useCallback, useEffect, useMemo, useState } from "react";
-import { AnimatePresence, motion } from "motion/react";
 
 import { Card, CardTitle, Pill } from "@/components/ui/card";
 import { Modal } from "@/components/ui/modal";
+import { SheetBawah } from "@/components/ui/sheet-bawah";
 import { Toast, useToast } from "@/components/ui/toast";
 import { Memuat } from "@/components/ui/memuat";
 import { getAccessToken } from "@/supabase/client";
@@ -536,9 +536,9 @@ export function ItsfoodPage() {
       </div>{/* grid kalender + detail */}
 
       {/* Detail order: desktop = modal tengah, mobile/tablet = sheet dari
-          bawah. Semua dialog SELALU mounted — yang berubah cuma prop
-          `open` + konten lewat useNilaiTerakhir — supaya animasi exit
-          sempat dimainkan AnimatePresence. */}
+          bawah (SheetBawah/Base UI). Animasi exit diputar oleh engine;
+          useNilaiTerakhir tetap menahan konten supaya exit tidak tampil
+          kosong. */}
       <Modal
         open={orderDibuka !== null && desktop}
         onClose={() => setOrderDibuka(null)}
@@ -580,9 +580,15 @@ export function ItsfoodPage() {
       <SheetBawah
         open={orderDibuka !== null && !desktop}
         onClose={() => setOrderDibuka(null)}
+        title={orderLayar ? `Order #${orderLayar.id}` : ""}
+        subtitle={
+          orderLayar
+            ? detailPerId[orderLayar.id]?.pemesan || orderLayar.customer
+            : undefined
+        }
       >
         {orderLayar && (
-          <div className="pt-3">
+          <div>
             <IsiDetailOrder
               order={orderLayar}
               detail={detailPerId[orderLayar.id]}
@@ -620,10 +626,10 @@ export function ItsfoodPage() {
       <SheetBawah
         open={ringkasanTerbuka && !desktop}
         onClose={() => setRingkasanTerbuka(false)}
+        title={`Ringkasan ${hariDipilih.getDate()} ${BULAN[hariDipilih.getMonth()]}`}
+        subtitle="Gabungan item semua order di hari terpilih"
       >
-        <div className="pt-3">
-          <RingkasanHarian orders={ordersHari} detailPerId={detailPerId} />
-        </div>
+        <RingkasanHarian orders={ordersHari} detailPerId={detailPerId} />
       </SheetBawah>
 
       <Modal
@@ -886,7 +892,7 @@ function KartuOrder({
           320px tanpa kolom tengah yang sempit. */}
       {detail && detail.items.length > 0 ? (
         <div className="mt-3">
-          <div className="grid grid-cols-[1fr_auto] items-baseline gap-x-3 border-b border-[#EEF4DE] pb-1.5 text-[11px] font-semibold uppercase tracking-[0.06em] text-muted-foreground dark:border-border/60">
+          <div className="grid grid-cols-[1fr_auto] items-baseline gap-x-3 border-b border-input pb-1.5 text-[11px] font-semibold uppercase tracking-[0.06em] text-muted-foreground dark:border-border/60">
             <span>Item</span>
             <span className="text-right">Subtotal</span>
           </div>
@@ -894,7 +900,7 @@ function KartuOrder({
             {detail.items.map((item, i) => (
               <li
                 key={i}
-                className="flex items-baseline justify-between gap-x-3 border-b border-[#EEF4DE] py-2 text-sm last:border-b-0 dark:border-border/60"
+                className="flex items-baseline justify-between gap-x-3 border-b border-input py-2 text-sm last:border-b-0 dark:border-border/60"
               >
                 <span className="min-w-0 font-medium">
                   <span className="font-bold tabular-nums">{item.qty}×</span>{" "}
@@ -994,7 +1000,14 @@ function RingkasanHarian({
      bukan diulang tiap item — tabel tetap kalimat yang bisa dibaca.
      Jam antar ikut di baris pertama: dapur mengurutkan kerja dari sana. */
   const grup = orders
-    .map((o) => ({ order: o, detail: detailPerId[o.id] }))
+    .map((o) => ({
+      order: o,
+      detail: detailPerId[o.id],
+      /** Alamat tujuan: rinci dari portal bila ada, jatuh ke kolom Alamat
+          daftar order supaya ringkasan tetap punya alamat sebelum detail
+          termuat. */
+      alamat: detailPerId[o.id]?.alamat?.trim() || o.address,
+    }))
     .filter((g) => g.detail && g.detail.items.length > 0);
 
   const totalPorsi = grup.reduce(
@@ -1021,7 +1034,7 @@ function RingkasanHarian({
         <>
           {/* Desktop: tabel — urutan baca konvensional, kolom rata, di
               dalam wadah tint (modalnya putih). */}
-          <div className="hidden rounded-2xl bg-background p-3 sm:block">
+          <div className="hidden rounded-2xl bg-background p-3 lg:block">
             <table className="w-full text-sm">
               <thead>
                 <tr className="border-b border-border text-[11px] uppercase tracking-[0.06em] text-muted-foreground">
@@ -1032,18 +1045,22 @@ function RingkasanHarian({
                 </tr>
               </thead>
               <tbody>
-                {grup.map(({ order, detail }) => (
+                {grup.map(({ order, detail, alamat }) => (
                   <Fragment key={order.id}>
                     {detail.items.map((it, i) => (
                       <tr
                         key={`${order.id}-${i}`}
-                        className="border-b border-[#EEF4DE] dark:border-border/60"
+                        className="border-b border-input"
                       >
-                        <td className="py-2 pr-3 align-top">
+                        <td className="w-56 min-w-0 py-2 pr-3 align-top">
                           {i === 0 && (
                             <>
                               <p className="font-bold tabular-nums">#{order.id}</p>
                               <PillAntar jam={order.deliveryTime} />
+                              <p className="mt-1 break-words text-[11px] leading-snug text-muted-foreground">
+                                {order.customer}
+                                {alamat && <> · 📍 {alamat}</>}
+                              </p>
                             </>
                           )}
                         </td>
@@ -1059,7 +1076,7 @@ function RingkasanHarian({
                       </tr>
                     ))}
                     {detail.catatan.trim() && (
-                      <tr className="border-b border-[#EEF4DE] dark:border-border/60">
+                      <tr className="border-b border-input">
                         <td colSpan={4} className="pb-3">
                           <BarisCatatan teks={detail.catatan.trim()} />
                         </td>
@@ -1074,21 +1091,25 @@ function RingkasanHarian({
           {/* Mobile: blok per order — tabel yang dipaksa sempit itu yang
               bikin susah dibaca; blok memberi tiap order ruang penuh dan
               bentuk kartunya jelas. */}
-          <div className="space-y-2.5 sm:hidden">
-            {grup.map(({ order, detail }) => (
+          <div className="space-y-2.5 lg:hidden">
+            {grup.map(({ order, detail, alamat }) => (
               <div
                 key={order.id}
-                className="rounded-2xl border border-border/60 bg-background p-3"
+                className="rounded-2xl border border-input bg-background p-3"
               >
-                <div className="mb-1.5 flex flex-wrap items-center justify-between gap-2">
+                <div className="mb-1 flex flex-wrap items-center justify-between gap-2">
                   <span className="text-sm font-bold tabular-nums">#{order.id}</span>
                   <PillAntar jam={order.deliveryTime} />
                 </div>
+                <p className="mb-1.5 break-words text-[11px] leading-snug text-muted-foreground">
+                  {order.customer}
+                  {alamat && <> · 📍 {alamat}</>}
+                </p>
                 <ul>
                   {detail.items.map((it, i) => (
                     <li
                       key={i}
-                      className="flex items-baseline justify-between gap-x-3 border-b border-[#EEF4DE] py-1.5 text-sm last:border-b-0 dark:border-border/60"
+                      className="flex items-baseline justify-between gap-x-3 border-b border-input py-1.5 text-sm last:border-b-0 dark:border-border/60"
                     >
                       <span className="min-w-0 font-medium">
                         <span className="font-bold tabular-nums">{it.qty}×</span>{" "}
@@ -1141,92 +1162,6 @@ function BarisCatatan({ teks }: { teks: string }) {
 /* Detail order — kartu diklik. Mobile/tablet: sheet dari bawah;       */
 /* desktop: modal tengah (Modal).                                      */
 /* ------------------------------------------------------------------ */
-
-/** Sheet bawah ala bottom sheet: slide-up tween, handle bar, isi scroll
-    sendiri. Keluar pakai tween singkat seperti Drawer repo — spring yang
-    menutup terbaca macet. */
-function SheetBawah({
-  open,
-  onClose,
-  children,
-}: {
-  open: boolean;
-  onClose: () => void;
-  children: React.ReactNode;
-}) {
-  useEffect(() => {
-    if (!open) return;
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") onClose();
-    };
-    document.addEventListener("keydown", onKey);
-    /* Kunci scroll position:fixed — sama dengan Modal; overflow:hidden
-       saja bocor di iOS. */
-    const y = window.scrollY;
-    const prev = {
-      position: document.body.style.position,
-      top: document.body.style.top,
-      left: document.body.style.left,
-      right: document.body.style.right,
-      width: document.body.style.width,
-      overflow: document.body.style.overflow,
-    };
-    document.body.style.position = "fixed";
-    document.body.style.top = `-${y}px`;
-    document.body.style.left = "0";
-    document.body.style.right = "0";
-    document.body.style.width = "100%";
-    document.body.style.overflow = "hidden";
-    return () => {
-      document.removeEventListener("keydown", onKey);
-      document.body.style.position = prev.position;
-      document.body.style.top = prev.top;
-      document.body.style.left = prev.left;
-      document.body.style.right = prev.right;
-      document.body.style.width = prev.width;
-      document.body.style.overflow = prev.overflow;
-      window.scrollTo(0, y);
-    };
-  }, [open, onClose]);
-
-  return (
-    <AnimatePresence>
-      {open && (
-        <div className="fixed inset-0 z-[70]">
-          <motion.button
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
-            transition={{ duration: 0.16 }}
-            aria-label="Tutup panel"
-            className="absolute inset-0 bg-black/45"
-            onClick={onClose}
-          />
-          <motion.div
-            role="dialog"
-            aria-modal="true"
-            initial={{ y: "100%" }}
-            animate={{ y: 0 }}
-            exit={{ y: "100%" }}
-            transition={{ type: "tween", duration: 0.24, ease: "easeOut" }}
-            className="absolute inset-x-0 bottom-0 flex max-h-[88dvh] flex-col rounded-t-3xl bg-card shadow-pop"
-          >
-            {/* Handle: tanda visual "ini sheet" — bukan drag sesungguhnya,
-                Escape/tap luar/tombol yang jalan menutup. */}
-            <button
-              aria-label="Tutup"
-              onClick={onClose}
-              className="flex shrink-0 justify-center pb-1 pt-2.5"
-            >
-              <span className="h-1.5 w-10 rounded-full bg-muted-foreground/30" />
-            </button>
-            <div className="min-h-0 overflow-y-auto px-5 pb-6">{children}</div>
-          </motion.div>
-        </div>
-      )}
-    </AnimatePresence>
-  );
-}
 
 /** Tautan aksi (telp/WA/email) — lime sebagai WARNA TEKS di atas putih
     gagal kontras; teks tetap gelap, aksen lime hadir sebagai underline. */
@@ -1390,7 +1325,7 @@ function IsiDetailOrder({
 
           {detail && detail.items.length > 0 && (
             <div className="mt-4 rounded-2xl bg-background p-3">
-              <div className="grid grid-cols-[1fr_auto] gap-x-3 border-b border-[#EEF4DE] pb-1.5 text-[11px] font-semibold uppercase tracking-[0.06em] text-muted-foreground dark:border-border/60">
+              <div className="grid grid-cols-[1fr_auto] gap-x-3 border-b border-input pb-1.5 text-[11px] font-semibold uppercase tracking-[0.06em] text-muted-foreground dark:border-border/60">
                 <span>Item ({detail.items.length})</span>
                 <span className="text-right">Subtotal</span>
               </div>
@@ -1398,7 +1333,7 @@ function IsiDetailOrder({
                 {detail.items.map((item, i) => (
                   <li
                     key={i}
-                    className="flex items-baseline justify-between gap-x-3 border-b border-[#EEF4DE] py-2 text-sm last:border-b-0 dark:border-border/60"
+                    className="flex items-baseline justify-between gap-x-3 border-b border-input py-2 text-sm last:border-b-0 dark:border-border/60"
                   >
                     <span className="min-w-0 font-medium">
                       <span className="font-bold tabular-nums">{item.qty}×</span>{" "}

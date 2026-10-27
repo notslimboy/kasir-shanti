@@ -36,7 +36,7 @@ const NAV: readonly NavItem[] = [
      bawah). Tiga menu: dashboard rekap, jadwal order, payment. Semua
      tetap tampil di mobile: dari HP data order justru paling sering
      dicek. */
-  { id: "itsfood-dash", label: "Dashboard Itsfood", tip: "Dashboard", icon: "chart" },
+  { id: "itsfood-dash", label: "Dasbor Itsfood", tip: "Dasbor", icon: "chart" },
   { id: "itsfood", label: "Order Itsfood", tip: "Order", icon: "truck" },
   { id: "itsfood-pay", label: "Payment Itsfood", tip: "Payment", icon: "banknote" },
   { id: "pengaturan", label: "Pengaturan", icon: "cog" },
