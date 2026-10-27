@@ -21,7 +21,8 @@ import {
   type PetaBayarOrder,
 } from "@/lib/itsfood";
 import { rupiah } from "@/lib/format";
-import { bacaCacheKlien, dgnCacheKlien, kosongkanCacheKlien } from "@/lib/itsfood-api";
+import type { RekapPembayaran } from "@/lib/itsfood";
+import { bacaCacheKlien, dgnCacheKlien, kosongkanCacheKlien, segarkanKlien } from "@/lib/itsfood-api";
 import { cn } from "@/lib/utils";
 
 /* ==========================================================================
@@ -65,28 +66,29 @@ interface InfoCache {
   umurDetik: number;
 }
 
+async function tarikOrders(
+  from: string,
+  to: string,
+): Promise<{ orders: ItsfoodOrder[] } & InfoCache> {
+  const res = await fetch(
+    `/api/itsfood/orders?from=${from}&to=${to}`,
+    { headers: { Authorization: `Bearer ${getAccessToken() ?? ""}` } },
+  );
+  const json = await res.json().catch(() => null);
+  if (!res.ok || !json?.ok) throw new Error(json?.error ?? `HTTP ${res.status}`);
+  return {
+    orders: json.orders as ItsfoodOrder[],
+    stale: Boolean(json.stale),
+    umurDetik: Number(json.umurDetik ?? 0),
+  };
+}
+
 async function apiOrders(
   from: string,
   to: string,
   paksa = false,
 ): Promise<{ orders: ItsfoodOrder[] } & InfoCache> {
-  return dgnCacheKlien(
-    `orders:${from}:${to}`,
-    async () => {
-      const res = await fetch(
-        `/api/itsfood/orders?from=${from}&to=${to}`,
-        { headers: { Authorization: `Bearer ${getAccessToken() ?? ""}` } },
-      );
-      const json = await res.json().catch(() => null);
-      if (!res.ok || !json?.ok) throw new Error(json?.error ?? `HTTP ${res.status}`);
-      return {
-        orders: json.orders as ItsfoodOrder[],
-        stale: Boolean(json.stale),
-        umurDetik: Number(json.umurDetik ?? 0),
-      };
-    },
-    { paksa },
-  );
+  return dgnCacheKlien(`orders:${from}:${to}`, () => tarikOrders(from, to), { paksa });
 }
 
 async function apiDetail(orderId: string): Promise<ItsfoodOrderDetail> {
@@ -120,35 +122,61 @@ interface DataPembayaran {
   billables: ItsfoodBillable[];
   bills: ItsfoodBill[];
   history: ItsfoodPaymentHistory[];
+  /** Ikut cache (bentuk kanonik "payments"); halaman ini sendiri tidak
+      memakainya. */
+  rekap?: RekapPembayaran;
   peta: PetaBayarOrder;
 }
 
+/** Bentuk KANONIK cache "payments" — SAMA untuk semua halaman itsfood:
+    daftar mentah + rekap persis seperti jawaban server. Objek turunan
+    (peta status) TIDAK ikut cache karena Set/Map mati di JSON; dibangun
+    ulang tiap kali dibaca. */
+interface HimpunPembayaran {
+  billables: ItsfoodBillable[];
+  bills: ItsfoodBill[];
+  history: ItsfoodPaymentHistory[];
+  rekap: RekapPembayaran;
+}
+
+async function tarikPembayaran(): Promise<HimpunPembayaran & InfoCache> {
+  const res = await fetch("/api/itsfood/payments", {
+    headers: { Authorization: `Bearer ${getAccessToken() ?? ""}` },
+  });
+  const json = await res.json().catch(() => null);
+  if (!res.ok || !json?.ok) throw new Error(json?.error ?? `HTTP ${res.status}`);
+  return {
+    billables: json.billables as ItsfoodBillable[],
+    bills: json.bills as ItsfoodBill[],
+    history: json.history as ItsfoodPaymentHistory[],
+    rekap: json.rekap as RekapPembayaran,
+    stale: Boolean(json.stale),
+    umurDetik: Number(json.umurDetik ?? 0),
+  };
+}
+
 async function apiPayments(paksa = false): Promise<DataPembayaran & InfoCache> {
-  const mentah = await dgnCacheKlien(
-    "payments",
-    async () => {
-      const res = await fetch("/api/itsfood/payments", {
-        headers: { Authorization: `Bearer ${getAccessToken() ?? ""}` },
-      });
-      const json = await res.json().catch(() => null);
-      if (!res.ok || !json?.ok) throw new Error(json?.error ?? `HTTP ${res.status}`);
-      /* Yang di-cache HANYA daftar mentah: Set/Map tidak bertahan
-         melewati JSON di sessionStorage, dan bentuknya harus sama dengan
-         halaman lain yang memakai kunci "payments". */
-      return {
-        billables: json.billables as ItsfoodBillable[],
-        bills: json.bills as ItsfoodBill[],
-        history: json.history as ItsfoodPaymentHistory[],
-        stale: Boolean(json.stale),
-        umurDetik: Number(json.umurDetik ?? 0),
-      };
-    },
-    { paksa },
-  );
+  const mentah = await dgnCacheKlien("payments", tarikPembayaran, { paksa });
   return {
     ...mentah,
     peta: petaBayarDari(mentah.billables, mentah.bills, mentah.history),
   };
+}
+
+/** Baca cache "payments" + bangun peta; entri salah bentuk (cache versi
+    lama / rusak) dianggap tidak ada, bukan menjatuhkan render. */
+function pembayaranDariCache(): DataPembayaran | null {
+  const c = bacaCacheKlien<HimpunPembayaran>("payments");
+  if (
+    !c ||
+    !Array.isArray(c.billables) ||
+    !Array.isArray(c.bills) ||
+    !Array.isArray(c.history) ||
+    !c.rekap
+  ) {
+    return null;
+  }
+  return { ...c, peta: petaBayarDari(c.billables, c.bills, c.history) };
 }
 
 /* ------------------------------------------------------------------ */
@@ -177,10 +205,9 @@ export function ItsfoodPage() {
   const [detailMemuat, setDetailMemuat] = useState(false);
   const [konfirmasi, setKonfirmasi] = useState<ItsfoodOrder | null>(null);
   const [menerima, setMenerima] = useState(false);
-  const [pembayaran, setPembayaran] = useState<DataPembayaran | null>(() => {
-    const c = bacaCacheKlien<Omit<DataPembayaran, "peta">>("payments");
-    return c ? { ...c, peta: petaBayarDari(c.billables, c.bills, c.history) } : null;
-  });
+  const [pembayaran, setPembayaran] = useState<DataPembayaran | null>(() =>
+    pembayaranDariCache(),
+  );
   const [pembayaranGalat, setPembayaranGalat] = useState("");
   /* Umur data kalender dari server — tampil sebagai teks kecil kalau
      yang ditampilkan stale (server sudah menyeret scraping ulang). */
@@ -192,9 +219,20 @@ export function ItsfoodPage() {
   const muatPembayaran = useCallback(async (paksa = false) => {
     setPembayaranGalat("");
     if (!paksa) {
-      const cached = bacaCacheKlien<Omit<DataPembayaran, "peta">>("payments");
+      const cached = pembayaranDariCache();
       if (cached) {
-        setPembayaran({ ...cached, peta: petaBayarDari(cached.billables, cached.bills, cached.history) });
+        setPembayaran(cached);
+        /* Ada di lokal (localStorage) → tampil langsung; versi terbaru
+           ditarik diam-diam di belakang (stale-while-revalidate): tanpa
+           spinner, tanpa toast, tanpa layar kosong. */
+        void segarkanKlien("payments", tarikPembayaran)
+          .then((hasil) => {
+            setPembayaran({
+              ...hasil,
+              peta: petaBayarDari(hasil.billables, hasil.bills, hasil.history),
+            });
+          })
+          .catch(() => {});
         return;
       }
     }
@@ -216,16 +254,25 @@ export function ItsfoodPage() {
   const muatBulan = useCallback(async (bulan: Date, paksa = false) => {
     const kunci = `${bulan.getFullYear()}-${String(bulan.getMonth() + 1).padStart(2, "0")}`;
     setGalat("");
-    /* Cache masih segar → pakai langsung. Tidak ada spinner, tidak ada
-       toast, tidak ada request: inilah yang membuat pindah menu terasa
-       instan. Tombol "Muat ulang" mengirim paksa=true untuk melewatinya. */
+    /* Data tersimpan (localStorage) → tampil langsung TANPA spinner/toast/
+       request, lalu versi terbaru ditarik diam-diam di belakang dan tampilan
+       diperbarui (stale-while-revalidate). Inilah yang membuat pindah menu
+       terasa instan. Tombol "Muat ulang" (paksa=true) dan bulan yang belum
+       pernah diambil tetap lewat jalur memuat yang terlihat di bawah. */
     if (!paksa) {
       const fromC = iso(new Date(bulan.getFullYear(), bulan.getMonth(), 1));
       const toC = iso(new Date(bulan.getFullYear(), bulan.getMonth() + 1, 0));
-      const cached = bacaOrdersCache(`orders:${fromC}:${toC}`);
+      const kunciCache = `orders:${fromC}:${toC}`;
+      const cached = bacaOrdersCache(kunciCache);
       if (cached) {
         setPerBulan((lama) => ({ ...lama, [kunci]: cached }));
         setMemuat(false);
+        void segarkanKlien(kunciCache, () => tarikOrders(fromC, toC))
+          .then((hasil) => {
+            setPerBulan((lama) => ({ ...lama, [kunci]: hasil.orders }));
+            setCacheInfo({ stale: hasil.stale, umurDetik: hasil.umurDetik });
+          })
+          .catch(() => {});
         return;
       }
     }
@@ -350,8 +397,9 @@ export function ItsfoodPage() {
       // Pesan hasil dipasang SETELAH muat ulang: muat ulang memakai toast
       // untuk progresnya dan menutupnya sendiri, jadi pesan sukses tidak
       // boleh dipasang lebih dulu (akan terhapus).
-      kosongkanCacheKlien(["orders:"]);
+      kosongkanCacheKlien(["orders:", "detail:", "payments"]);
       await muatBulan(bulanTampil, true);
+      void muatPembayaran(true);
       setToast({ tone: hasil.sukses ? "ok" : "warn", text: hasil.pesan });
     } catch {
       setToast({ tone: "warn", text: "Gagal mengirim permintaan terima" });

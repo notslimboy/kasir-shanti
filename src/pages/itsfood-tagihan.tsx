@@ -27,7 +27,7 @@ import {
   tanggalPendekItsfood,
 } from "@/lib/itsfood";
 import { rupiah } from "@/lib/format";
-import { bacaCacheKlien, dgnCacheKlien, kosongkanCacheKlien } from "@/lib/itsfood-api";
+import { bacaCacheKlien, dgnCacheKlien, kosongkanCacheKlien, segarkanKlien } from "@/lib/itsfood-api";
 import { cn } from "@/lib/utils";
 
 /* ==========================================================================
@@ -50,29 +50,46 @@ interface DataPayments {
   billables: ItsfoodBillable[];
   bills: ItsfoodBill[];
   history: ItsfoodPaymentHistory[];
-  /** Diturunkan di klien, tidak di-cache: bentuk cache "payments" harus
-      sama dengan halaman lain (daftar mentah saja). */
-  rekap?: RekapPembayaran;
+  /** Bentuk kanonik cache "payments" — sama untuk semua halaman itsfood:
+      daftar mentah + rekap persis seperti jawaban server. */
+  rekap: RekapPembayaran;
+}
+
+/** Sumber data mentah — bentuk yang DITULIS ke cache "payments" (kanonik
+    untuk semua halaman itsfood). Dipakai lewat cache (dgnCacheKlien) maupun
+    di latar (segarkanKlien). */
+async function tarikPembayaran(): Promise<DataPayments> {
+  const res = await fetch("/api/itsfood/payments", {
+    headers: { Authorization: `Bearer ${getAccessToken() ?? ""}` },
+  });
+  const json = await res.json().catch(() => null);
+  if (!res.ok || !json?.ok) throw new Error(json?.error ?? `HTTP ${res.status}`);
+  return {
+    billables: json.billables as ItsfoodBillable[],
+    bills: json.bills as ItsfoodBill[],
+    history: json.history as ItsfoodPaymentHistory[],
+    rekap: json.rekap as RekapPembayaran,
+  };
 }
 
 async function apiPayments(paksa = false): Promise<DataPayments> {
-  return dgnCacheKlien(
-    "payments",
-    async () => {
-      const res = await fetch("/api/itsfood/payments", {
-        headers: { Authorization: `Bearer ${getAccessToken() ?? ""}` },
-      });
-      const json = await res.json().catch(() => null);
-      if (!res.ok || !json?.ok) throw new Error(json?.error ?? `HTTP ${res.status}`);
-      return {
-        billables: json.billables as ItsfoodBillable[],
-        bills: json.bills as ItsfoodBill[],
-        history: json.history as ItsfoodPaymentHistory[],
-        rekap: json.rekap as RekapPembayaran,
-      };
-    },
-    { paksa },
-  );
+  return dgnCacheKlien("payments", tarikPembayaran, { paksa });
+}
+
+/** Baca cache "payments"; entri salah bentuk (cache versi lama / rusak)
+    dianggap tidak ada supaya pembaca tanpa data tidak jatuh. */
+function bacaPaymentsValid(): DataPayments | null {
+  const c = bacaCacheKlien<DataPayments>("payments");
+  if (
+    !c ||
+    !Array.isArray(c.billables) ||
+    !Array.isArray(c.bills) ||
+    !Array.isArray(c.history) ||
+    !c.rekap
+  ) {
+    return null;
+  }
+  return c;
 }
 
 async function apiMakeBill(orderId: string): Promise<{ sukses: boolean; pesan: string }> {
@@ -99,10 +116,8 @@ async function apiDetailPayment(paymentId: string): Promise<ItsfoodPaymentDetail
 
 export function ItsfoodTagihanPage() {
   const [tab, setTab] = useState<Tab>("billables");
-  const [data, setData] = useState<DataPayments | null>(
-    () => bacaCacheKlien<DataPayments>("payments") ?? null,
-  );
-  const [memuat, setMemuat] = useState(true);
+  const [data, setData] = useState<DataPayments | null>(() => bacaPaymentsValid());
+  const [memuat, setMemuat] = useState(() => !bacaPaymentsValid());
   const [galat, setGalat] = useState("");
   const [konfirmasi, setKonfirmasi] = useState<ItsfoodBillable | null>(null);
   const [memproses, setMemproses] = useState(false);
@@ -113,12 +128,16 @@ export function ItsfoodTagihanPage() {
 
   const muat = useCallback(async (paksa = false) => {
     setGalat("");
-    /* Cache segar = langsung tampil, tanpa spinner. */
+    /* Data tersimpan (localStorage) → tampil langsung TANPA request; versi
+       terbaru ditarik diam-diam di belakang (stale-while-revalidate). */
     if (!paksa) {
-      const cached = bacaCacheKlien<DataPayments>("payments");
+      const cached = bacaPaymentsValid();
       if (cached) {
         setData(cached);
         setMemuat(false);
+        void segarkanKlien("payments", tarikPembayaran)
+          .then((hasil) => setData(hasil))
+          .catch(() => {});
         return;
       }
     }

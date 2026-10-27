@@ -30,8 +30,9 @@ import {
   type ItsfoodPaymentHistory,
   type PeriodeRekap,
 } from "@/lib/itsfood";
+import type { RekapPembayaran } from "@/lib/itsfood";
 import { rupiah, rupiahShort } from "@/lib/format";
-import { bacaCacheKlien, dgnCacheKlien } from "@/lib/itsfood-api";
+import { bacaCacheKlien, dgnCacheKlien, segarkanKlien } from "@/lib/itsfood-api";
 import { cn } from "@/lib/utils";
 
 /* ==========================================================================
@@ -69,33 +70,45 @@ interface DataPayments {
   billables: ItsfoodBillable[];
   bills: ItsfoodBill[];
   history: ItsfoodPaymentHistory[];
+  /** Ikut cache (bentuk kanonik "payments"); halaman ini sendiri tidak
+      memakainya. */
+  rekap?: RekapPembayaran;
+}
+
+/** Sumber data mentah — bentuk yang DITULIS ke cache "payments" (kanonik
+    untuk semua halaman itsfood, rekap ikut dari server); dipakai lewat cache
+    (dgnCacheKlien) maupun di latar (segarkanKlien). */
+async function tarikPembayaran(): Promise<DataPayments> {
+  const res = await fetch("/api/itsfood/payments", {
+    headers: { Authorization: `Bearer ${getAccessToken() ?? ""}` },
+  });
+  const json = await res.json().catch(() => null);
+  if (!res.ok || !json?.ok) throw new Error(json?.error ?? `HTTP ${res.status}`);
+  return {
+    billables: json.billables as ItsfoodBillable[],
+    bills: json.bills as ItsfoodBill[],
+    history: json.history as ItsfoodPaymentHistory[],
+    rekap: json.rekap as RekapPembayaran,
+  };
 }
 
 async function apiPayments(paksa = false): Promise<DataPayments> {
-  return dgnCacheKlien(
-    "payments",
-    async () => {
-      const res = await fetch("/api/itsfood/payments", {
-        headers: { Authorization: `Bearer ${getAccessToken() ?? ""}` },
-      });
-      const json = await res.json().catch(() => null);
-      if (!res.ok || !json?.ok) throw new Error(json?.error ?? `HTTP ${res.status}`);
-      return {
-        billables: json.billables as ItsfoodBillable[],
-        bills: json.bills as ItsfoodBill[],
-        history: json.history as ItsfoodPaymentHistory[],
-      };
-    },
-    { paksa },
-  );
+  return dgnCacheKlien("payments", tarikPembayaran, { paksa });
+}
+
+/** Baca cache "payments"; entri salah bentuk dianggap tidak ada. */
+function bacaPaymentsValid(): DataPayments | null {
+  const c = bacaCacheKlien<DataPayments>("payments");
+  if (!c || !Array.isArray(c.billables) || !Array.isArray(c.bills) || !Array.isArray(c.history)) {
+    return null;
+  }
+  return c;
 }
 
 export function ItsfoodDashboardPage() {
   const nav = useNavigate();
-  const [data, setData] = useState<DataPayments | null>(
-    () => bacaCacheKlien<DataPayments>("payments") ?? null,
-  );
-  const [memuat, setMemuat] = useState(true);
+  const [data, setData] = useState<DataPayments | null>(() => bacaPaymentsValid());
+  const [memuat, setMemuat] = useState(() => !bacaPaymentsValid());
   const [galat, setGalat] = useState("");
   const [periode, setPeriode] = useState<PeriodeRekap>("bulan");
   const [hariTren, setHariTren] = useState<(typeof HARI_TREN)[number]>(30);
@@ -103,12 +116,16 @@ export function ItsfoodDashboardPage() {
 
   const muat = useCallback(async (paksa = false) => {
     setGalat("");
-    /* Cache segar = langsung tampil, tanpa spinner. */
+    /* Data tersimpan (localStorage) → tampil langsung TANPA request; versi
+       terbaru ditarik diam-diam di belakang (stale-while-revalidate). */
     if (!paksa) {
-      const cached = bacaCacheKlien<DataPayments>("payments");
+      const cached = bacaPaymentsValid();
       if (cached) {
         setData(cached);
         setMemuat(false);
+        void segarkanKlien("payments", tarikPembayaran)
+          .then((hasil) => setData(hasil))
+          .catch(() => {});
         return;
       }
     }
