@@ -272,6 +272,13 @@ export const CSS_LAPORAN = `
   font-size: 7.5pt;
 }
 
+/* Penanda pelunasan di kolom nama: "Nama  Lunas". Bold saja, tanpa warna —
+   cetakannya sering hitam-putih, jadi warna tidak bisa diandalkan. */
+.print-report-transactions td .print-report-lunas {
+  font-weight: 700;
+  white-space: nowrap;
+}
+
 .print-report-transactions .print-report-courier-cell {
   color: #0f5f58;
   font-size: 7.5pt;

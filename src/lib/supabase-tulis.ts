@@ -118,6 +118,10 @@ export type UbahStrukInput = {
    *  total yang sama seperti `simpanPenjualan`. */
   ongkir: number;
   diskon: number;
+  /** Id baris yang dihapus eksplisit dari form (tombol hapus). Barisnya
+   *  DIDELETE dari sale_items saat Simpan — bukan menetap sebagai qty 0.
+   *  Opsional agar pemanggil lama tetap sah. */
+  hapusIds?: number[];
 };
 
 export type HasilUbah = {
@@ -152,6 +156,15 @@ export function bagiBarisUbah(lines: BarisUbah[]): {
 
 export async function ubahStruk(input: UbahStrukInput): Promise<HasilUbah> {
   const { disimpan, baru, dibuang } = bagiBarisUbah(input.lines);
+  const dihapusTombol = (input.hapusIds ?? []).filter((id) => Number.isFinite(id) && id > 0);
+  /* Id yang dibuang aturan qty 0 — hapusIds yang sama tidak boleh menghitung
+     dobel panjangnya `dibuang` walau DELETE-nya di-dedup. */
+  const setQty0 = new Set(
+    input.lines
+      .filter((l) => !(Number(l.qty) > 0))
+      .map((l) => l.id)
+      .filter((id) => Number.isFinite(id) && id > 0),
+  );
 
   /* Baris lama tanpa id berarti form-nya dibangun dari sumber yang tidak punya
      primary key. Menjalankan PATCH dengan `id=eq.undefined` akan menimpa
@@ -168,7 +181,7 @@ export async function ubahStruk(input: UbahStrukInput): Promise<HasilUbah> {
   if (disimpan.length + baru.length === 0) {
     return {
       ok: false,
-      pesan: "Semua item&qty 0. Struk tidak bisa disimpan kosong — batalkan struknya dari menu Penjualan.",
+      pesan: "Semua item sudah dibuang. Struk tidak bisa disimpan kosong — batalkan struknya dari menu Penjualan.",
     };
   }
 
@@ -206,20 +219,24 @@ export async function ubahStruk(input: UbahStrukInput): Promise<HasilUbah> {
     });
     if (!hasilHeader.ok) return { ok: false, pesan: hasilHeader.pesan };
 
-    /* 2. Baris yang dihapus (qty jadi 0). Dilakukan lebih dulu supaya tidak
-          ada baris dengan qty 0 tertinggal kalau salah satu PATCH di bawah
-          gagal — struk seperti itu tercetak sia-sia dan muncul di KOT. */
-    const idDibuang = input.lines
-      .filter((l) => !(Number(l.qty) > 0))
-      .map((l) => l.id)
-      .filter((id) => Number.isFinite(id) && id > 0);
-    if (idDibuang.length > 0) {
+    /* 2. Baris yang dihapus: lewat aturan qty 0 maupun lewat tombol hapus.
+           Dilakukan lebih dulu supaya tidak ada baris mati tertinggal kalau
+           salah satu PATCH di bawah gagal — struk seperti itu tercetak
+           sia-sia dan muncul di KOT. */
+    const unik = [
+      ...input.lines
+        .filter((l) => !(Number(l.qty) > 0))
+        .map((l) => l.id)
+        .filter((id) => Number.isFinite(id) && id > 0),
+      ...dihapusTombol,
+    ].reduce<number[]>((a, id) => (a.includes(id) ? a : [...a, id]), []);
+    if (unik.length > 0) {
       const hapus = await fetch(
-        `${SUPABASE_URL}/rest/v1/sale_items?id=in.(${idDibuang.join(",")})`,
+        `${SUPABASE_URL}/rest/v1/sale_items?id=in.(${unik.join(",")})`,
         { method: "DELETE", headers: { ...headerRest(), Prefer: "return=minimal" } },
       );
       if (!hapus.ok) {
-        return { ok: false, pesan: `Gagal membuang item qty 0 (${hapus.status}).` };
+        return { ok: false, pesan: `Gagal membuang item yang dihapus (${hapus.status}).` };
       }
     }
 
@@ -282,7 +299,7 @@ export async function ubahStruk(input: UbahStrukInput): Promise<HasilUbah> {
     ok: true,
     subtotal,
     total,
-    dibuang,
+    dibuang: dibuang + dihapusTombol.filter((id) => !setQty0.has(id)).length,
     statusBerubah: sudahLunas && !masihLunas && total > totalLama,
   };
 }

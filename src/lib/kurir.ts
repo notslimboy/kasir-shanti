@@ -14,7 +14,7 @@ import { AWALAN_TAG, inferTagArea, tagDariAlias } from "./tag-area";
    ========================================================================== */
 
 export const KURIR_GROUPS: { kurir: string; tags: string[] }[] = [
-  { kurir: "Hide/Vendi", tags: ["ITS"] },
+  { kurir: "Raka/Vendi", tags: ["ITS"] },
   { kurir: "Yanto", tags: ["Sutorejo", "BPD", "Mulyosari", "Dharmahusada", "Wisper"] },
   { kurir: "Sudes", tags: ["Kenjeran", "Pakuwon", "Pantai Mentari", "Bhaskara"] },
   { kurir: "GOJEK", tags: ["GOJEK"] },

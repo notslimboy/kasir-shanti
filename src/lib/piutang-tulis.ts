@@ -206,6 +206,31 @@ export async function catatPembayaranPiutang(
 }
 
 /**
+ * Tandai lunas dari Detail Struk / Ubah Data: cicil tepat sebanyak sisa,
+ * tanpa deposit.
+ *
+ * Kasir menerima uangnya di luar aplikasi (chat, bawaan) lalu hanya ingin
+ * status struk berubah — mengetik nominalnya lagi di Piutang dua kali kerja.
+ * Nominal yang ditulis ke `sale_payments` tetap sisa tagihan, jadi riwayat
+ * pembayarannya bisa dibalikkan lewat `batalkanLunasPiutang` seperti
+ * pembayaran apa pun.
+ */
+export async function lunasKanPiutang(
+  saleId: number,
+  note = "Pelunasan dicatat dari Detail Struk",
+): Promise<HasilPiutang> {
+  let sale: SaleRow;
+  try {
+    sale = await ambilStruk(saleId);
+  } catch (e) {
+    return { ok: false, pesan: (e as Error).message };
+  }
+  const sisa = sisaPiutang(sale);
+  if (sisa <= 0) return { ok: false, pesan: "Transaksi ini sudah lunas." };
+  return catatPembayaranPiutang(saleId, sisa, note);
+}
+
+/**
  * Total `paid_amount` setelah pembatalan, dihitung dari baris `sale_payments`
  * yang masih ada di server.
  *

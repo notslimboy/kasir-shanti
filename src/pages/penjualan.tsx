@@ -28,6 +28,7 @@ import { TeksPotong } from "@/components/ui/tooltip";
 import { KotCard } from "@/components/kot-card";
 import { buildKitchenOrderTicket } from "@/lib/kot";
 import { StrukDrawer } from "@/components/struk-drawer";
+import { lunasKanPiutang, type HasilPiutang } from "@/lib/piutang-tulis";
 import { ChartBox } from "@/components/chart-box";
 import { ChartDonut } from "@/components/chart-donut";
 import { CHART_ANIM } from "@/components/chart-motion";
@@ -308,13 +309,18 @@ export function PenjualanPage() {
     const kunci = cari.trim().toLowerCase();
     /* Tag ikut dicari karena area punya kaitan dengan kurir: satu area = satu
        kurir, jadi "semua kiriman Sutorejo" lebih sering ditanyakan
-       daripada nama per struk. */
+       daripada nama per struk. Kurir (yang diturunkan dari tag) juga dicari,
+       supaya mengetik "Raka" atau "Yanto" langsung memfilter struk yang
+       areanya masuk ke kurir itu — tanpa harus tahu tag alamatnya dulu. */
     const disaring = kunci
-      ? perStatus.filter((s) =>
-          [s.receiptNo, s.customer, s.tag, s.payment, s.status].some((t) =>
-            t.toLowerCase().includes(kunci),
-          ) || String(s.total).includes(kunci),
-        )
+      ? perStatus.filter((s) => {
+          const kurir = kurirDariTag(s.tag);
+          return (
+            [s.receiptNo, s.customer, s.tag, kurir, s.payment, s.status].some((t) =>
+              t.toLowerCase().includes(kunci),
+            ) || String(s.total).includes(kunci)
+          );
+        })
       : perStatus;
     return urutkan(disaring, urutan, kolomNilai);
   }, [struk, status, cari, urutan, tagUntukNama]);
@@ -444,6 +450,43 @@ export function PenjualanPage() {
       return hasil;
     } catch (e) {
       const pesan = `Gagal menyimpan: ${(e as Error).message}`;
+      setCatatan({ tone: "warn", text: pesan });
+      return { ok: false, pesan };
+    } finally {
+      setSedangProses(null);
+    }
+  };
+
+  /* Tandai Lunas dari drawer: cicil tepat sebanyak sisa tagihan, tanpa
+     deposit. Refresh rentangnya sama dengan simpanUbah — status "Lunas"
+     dihitung dari `paid_amount >= total`, jadi tanpa penarikan ulang Pill
+     struknya tetap "Belum Lunas". */
+  const tandaiLunas = async (s: Sale): Promise<HasilPiutang> => {
+    setSedangProses(s.id);
+    try {
+      const hasil = await lunasKanPiutang(s.id);
+      if (!hasil.ok) {
+        setCatatan({ tone: "warn", text: hasil.pesan });
+        return hasil;
+      }
+      /* Status "Lunas" dihitung dari paid_amount >= total. Supabase sudah
+         menulis paid_amount lewat lunasKanPiutang di atas; di sini yang
+         dilakukan adalah menampilkannya segera — tanpa ini Pill struknya
+         tetap "Belum Lunas" sampai rentang ditarik ulang, dan kasir
+         mengira pelunasan tidak masuk. */
+      setStrukAktif((prev) =>
+        prev && prev.id === s.id ? { ...prev, status: "lunas" } : prev,
+      );
+      await data.segarkanRentang(tgl(effectiveRange.from), tgl(effectiveRange.to));
+      const segar = (data.struk as Sale[]).find((x) => x.id === s.id);
+      if (segar && segar.status === "lunas") setStrukAktif(segar);
+      setCatatan({
+        tone: "ok",
+        text: `${s.receiptNo} dilunasi${hasil.deposit > 0 ? ` — Rp ${hasil.deposit.toLocaleString("id-ID")} masuk deposit` : ""}.`,
+      });
+      return hasil;
+    } catch (e) {
+      const pesan = `Gagal mencatat pelunasan: ${(e as Error).message}`;
       setCatatan({ tone: "warn", text: pesan });
       return { ok: false, pesan };
     } finally {
@@ -735,7 +778,12 @@ export function PenjualanPage() {
           onChange={setCustomer}
           options={[
             { value: "semua", label: "Semua customer" },
-            ...daftarCustomer.map((c) => ({ value: c.id, label: c.name, hint: c.tag ?? undefined })),
+            ...daftarCustomer.map((c) => ({
+              value: c.id,
+              label: c.name,
+              hint: c.tag ?? undefined,
+              keywords: kurirDariTag(c.tag ?? "") || undefined,
+            })),
           ]}
         />
 
@@ -1221,6 +1269,7 @@ export function PenjualanPage() {
         onRestore={(s) => void jalankan(s, "restore")}
         onHapusPermanen={(s) => setKonfirmasiPermanen(s)}
         onSimpan={simpanUbah}
+        onLunas={tandaiLunas}
         /* Katalog menu dimuat saat diminta, bukan saat halaman dibuka:
            Penjualan tidak butuh 1.095 produk untuk menampilkan tabel struk,
            dan menunggu katalognya berarti menunggu tanpa alasan. */

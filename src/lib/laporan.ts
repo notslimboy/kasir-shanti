@@ -170,8 +170,16 @@ const esc = (v: unknown): string =>
 const rupiah = (v: number): string =>
   `Rp&nbsp;${new Intl.NumberFormat("id-ID").format(Math.round(v))}`;
 
-function barisTransaksi(s: Sale, index: number, kurir: string): string {
-  const nama = esc(s.customer || "Customer belum diisi");
+/** Diekspor untuk test laporan.test.ts — bentuk kolom nama adalah kontrak
+ *  cetak yang sama di laporan dan di Detail Transaksi. */
+export function barisTransaksi(s: Sale, index: number, kurir: string): string {
+  /* Struk lunas dapat embel-embel "Lunas" tebal di kolom nama — "nama ->
+     status" yang diminta kasir. Dipisah <span>, bukan nama + spasi: pelapor
+     membaca kolom nama dari jauh, dan teks tambahannya harus bisa dicandak
+     dari CSS, bukan diselip ke dalam nama yang di-esc. */
+  const nama =
+    esc(s.customer || "Customer belum diisi") +
+    (s.status === "lunas" ? ' <span class="print-report-lunas">Lunas</span>' : "");
   const ongkir = s.ongkir ?? 0;
   const bayar = esc(s.payment || "Tunai");
   const kelas = (index + 1) % 2 === 0 ? ' class="row-even"' : "";

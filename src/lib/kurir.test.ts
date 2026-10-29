@@ -7,7 +7,7 @@ import { grupPerKurir, kurirDariTag, petaTag, rekapOngkirPerKurir, TAG_TANPA_PEM
 
 describe("kurirDariTag", () => {
   it("memetakan tag area ke kurir", () => {
-    expect(kurirDariTag("ITS")).toBe("Hide/Vendi");
+    expect(kurirDariTag("ITS")).toBe("Raka/Vendi");
     expect(kurirDariTag("Sutorejo")).toBe("Yanto");
     expect(kurirDariTag("Mulyosari")).toBe("Yanto");
     expect(kurirDariTag("Bhaskara")).toBe("Sudes");

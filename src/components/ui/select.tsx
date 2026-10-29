@@ -26,6 +26,10 @@ export type SelectOption = {
   label: string;
   hint?: string;
   prefix?: React.ReactNode;
+  /* Teks tambahan yang ikut dicari saat `searchable`, tapi tidak ditampilkan
+     — misalnya kurir yang diturunkan dari tag alamat, supaya mengetik
+     "Raka" menemukan semua customer di area ITS tanpa harus tahu tag-nya. */
+  keywords?: string;
   /* Judul kelompok. Opsi yang bersebelahan dengan group sama dirangkai di
      bawah satu header — setara <optgroup> di select native, tanpapopup OS. */
   group?: string;
@@ -80,7 +84,8 @@ export function Select({
     return options.filter(
       (o) =>
         o.label.toLowerCase().includes(k) ||
-        (o.hint ?? "").toLowerCase().includes(k),
+        (o.hint ?? "").toLowerCase().includes(k) ||
+        (o.keywords ?? "").toLowerCase().includes(k),
     );
   }, [options, q, searchable]);
 

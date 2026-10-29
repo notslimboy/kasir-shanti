@@ -8,7 +8,7 @@ const CHART = ["var(--chart-1)", "var(--chart-2)", "var(--chart-3)", "var(--char
 
 /* Kartu ongkir per kurir.
  *
- * Baris utamanya satu per kurir ("Hide/Vendi", "Yanto", …) karena itu yang
+ * Baris utamanya satu per kurir ("Raka/Vendi", "Yanto", …) karena itu yang
  * ditanyakan. Rincian area (ITS, Sutorejo, …) dibuka saat diklik — tetap di
  * dalam kartu ini, bukan disembunyikan di halaman lain.
  *

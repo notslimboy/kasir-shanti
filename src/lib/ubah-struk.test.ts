@@ -224,6 +224,54 @@ describe("ubahStruk — baris item", () => {
     expect(idxDelete).toBeGreaterThanOrEqual(0);
     expect(idxPatchItems).toBeGreaterThan(idxDelete);
   });
+
+  it("hapusIds: baris yang dihapus tombol juga di-DELETE", async () => {
+    /* Tombol hapus membuang baris dari form, bukan menyetel qty 0 — tanpa
+       daftar hapus eksplisit barisnya diam-diam tetap ada di sale_items. */
+    const hasil = await ubahStruk({
+      ...DASAR,
+      lines: [{ id: 11, qty: 1, price: 20_000, note: "" }],
+      hapusIds: [12, 13],
+    });
+
+    expect(hasil.ok).toBe(true);
+    expect(hasil.dibuang).toBe(2);
+    const del = panggil.find((p) => p.method === "DELETE");
+    expect(del).toBeDefined();
+    expect(del!.url).toContain("in.(12,13)");
+    /* Subtotal/total hanya menghitung baris yang tersisa. */
+    expect(hasil.subtotal).toBe(20_000);
+    expect(hasil.total).toBe(20_000);
+  });
+
+  it("hapusIds dan baris qty 0 saling mencegah duplikat DELETE", async () => {
+    const hasil = await ubahStruk({
+      ...DASAR,
+      lines: [
+        { id: 11, qty: 1, price: 20_000, note: "" },
+        { id: 12, qty: 0, price: 5_000, note: "" },
+      ],
+      hapusIds: [12],
+    });
+
+    expect(hasil.ok).toBe(true);
+    /* 12 muncul sekali — hapus dua kali id yang sama tidak ada artinya. */
+    const del = panggil.find((p) => p.method === "DELETE");
+    expect(del!.url).toContain("in.(12)");
+    expect(del!.url).not.toMatch(/12, ?12/);
+    expect(hasil.dibuang).toBe(1);
+  });
+
+  it("membuang semua item: baris tersisa dan hapusIds tidak menghitung dobel", async () => {
+    /* Menolaknya tetap: struk tidak boleh kosong. */
+    const hasil = await ubahStruk({
+      ...DASAR,
+      lines: [],
+      hapusIds: [11, 12],
+    });
+    expect(hasil.ok).toBe(false);
+    expect(hasil.pesan).toMatch(/tidak bisa disimpan kosong/i);
+  });
 });
 
 describe("ubahStruk — menambah item", () => {

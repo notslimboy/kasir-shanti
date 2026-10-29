@@ -511,6 +511,11 @@ export function ImporPesananPage() {
   const [mulaiNo, setMulaiNo] = useStatePersisten<number>("impor:mulaiNo", 1, (v) =>
     typeof v === "number" && v >= 1 ? Math.floor(v) : 1,
   );
+  /* Input "Nomor awal" bisa kosong: teks mentahnya ditahan sementara, dan
+     nilai sah yang terakhir tetap dipakai untuk berhitung. Memaksa
+     kosong langsung jadi 1 berarti backspace dijejal angka — angka lama
+     menempel, dan kasir tidak bisa mengetik "25" sebelum menghapus "1". */
+  const [mulaiNoTeks, setMulaiNoTeks] = useState<string | null>(null);
   const nomorDraft = (p: PesananImpor) => {
     const i = daftarSiap.findIndex((d) => d === p);
     return mulaiNo + (i < 0 ? 0 : i);
@@ -671,8 +676,14 @@ export function ImporPesananPage() {
                   min={1}
                   step={1}
                   inputMode="numeric"
-                  value={mulaiNo}
-                  onChange={(e) => setMulaiNo(Math.max(1, Number(e.target.value) || 1))}
+                  value={mulaiNoTeks ?? mulaiNo}
+                  placeholder="1"
+                  onChange={(e) => {
+                    setMulaiNoTeks(e.target.value);
+                    const n = Math.floor(Number(e.target.value));
+                    if (Number.isFinite(n) && n >= 1) setMulaiNo(n);
+                  }}
+                  onBlur={() => setMulaiNoTeks(null)}
                   className="h-9 w-20 rounded-xl border border-input bg-background px-2 text-sm font-semibold figure"
                 />
               </label>

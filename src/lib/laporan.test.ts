@@ -1,6 +1,12 @@
 import { describe, expect, it } from "vitest";
 
-import { bagiHalamanDetail, labelRentang, labelTanggal, perkiraanUnit } from "./laporan";
+import {
+  barisTransaksi,
+  bagiHalamanDetail,
+  labelRentang,
+  labelTanggal,
+  perkiraanUnit,
+} from "./laporan";
 import type { Sale } from "./sale";
 
 /* Bentuk laporan harus sama dengan cetakan versi lama (script.js
@@ -106,6 +112,24 @@ describe("bagiHalamanDetail", () => {
     const h = bagiHalamanDetail([satu], () => perkiraanUnit(satu), { batasSatuanHalaman1: 10 });
     expect(h).toHaveLength(1);
     expect(h[0].struk).toHaveLength(1);
+  });
+});
+
+describe("barisTransaksi — penanda lunas di kolom nama", () => {
+  it("struk lunas mendapat 'Lunas' tebal setelah nama", () => {
+    const baris = barisTransaksi(struk({ status: "lunas", customer: "Budi" }), 0, "-");
+    expect(baris).toContain('Budi <span class="print-report-lunas">Lunas</span>');
+  });
+
+  it("struk belum lunas hanya menampilkan nama", () => {
+    const baris = barisTransaksi(struk({ status: "belum", customer: "Budi" }), 0, "-");
+    expect(baris).toContain(">Budi</td>");
+    expect(baris).not.toContain("print-report-lunas");
+  });
+
+  it("penanda muncul juga untuk struk tanpa item", () => {
+    const baris = barisTransaksi(struk({ status: "lunas", lines: [] }), 0, "-");
+    expect(baris).toContain('class="print-report-lunas"');
   });
 });
 

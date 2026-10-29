@@ -10,6 +10,7 @@ import { rupiah } from "@/lib/format";
 import { formatRupiah } from "@/lib/struk";
 import { useSetelan } from "@/lib/setelan";
 import type { HasilUbah, UbahStrukInput } from "@/lib/supabase-tulis";
+import type { HasilPiutang } from "@/lib/piutang-tulis";
 import { InputRupiah } from "@/components/ui/input-rupiah";
 import { cariOpsiItem, opsiItemStruk, type OpsiItemStruk } from "@/lib/pilih-item-struk";
 import type { Product } from "@/lib/menu-seed";
@@ -52,7 +53,11 @@ type BarisForm = {
   id: number;
   name: string;
   variant: string;
-  qty: number;
+  /** Angka, atau "" selagi inputnya sedang kosong. "" adalah keadaan
+   *  nyata dari kotak yang belum diisi — dipaksa jadi 0 berarti kasir
+   *  tidak bisa menghapus isinya untuk mengetik ulang angkanya dari
+   *  awal, karena setiap bolong buru-buru dijejal angka 0. */
+  qty: number | "";
   price: number;
   note: string;
   baru?: boolean;
@@ -88,7 +93,7 @@ function useFormUbah() {
  *  atau minus. Nama barisnya dipakai untuk peringatan sebelum disimpan —
  *  konfirmasi tanpa nama tidak membuat orang berhenti sebelum menekan Simpan. */
 function barisDibuang(lines: BarisForm[]): BarisForm[] {
-  return lines.filter((l) => l.qty <= 0);
+  return lines.filter((l) => (Number(l.qty) || 0) <= 0);
 }
 
 export function StrukDrawer({
@@ -98,6 +103,7 @@ export function StrukDrawer({
   onRestore,
   onHapusPermanen,
   onSimpan,
+  onLunas,
   produk,
   onMintaProduk,
   produkDimuat = false,
@@ -116,6 +122,9 @@ export function StrukDrawer({
    *  karena tanpa ini "✓ Tersimpan" cuma bohong: tidak ada yang masuk
    *  database dan seluruh ketikan hilang saat drawer ditutup. */
   onSimpan?: (payload: UbahStrukInput) => Promise<HasilUbah>;
+  /** Tandai struk ini lunas (cicil tepat sebanyak sisa). Kosong = tombol
+   *  Tandai Lunas disembunyikan, sama seperti aksi lain yang butuh penulis. */
+  onLunas?: (sale: Sale) => Promise<HasilPiutang>;
   /** Katalog menu untuk "Tambah item". Kosong = katalognya belum dimuat. */
   produk?: Product[];
   /** Dipanggil saat kasir membuka pemilih menu. Katalog Penjualan dimuat
@@ -136,6 +145,14 @@ export function StrukDrawer({
   const [tersimpan, setTersimpan] = useState(false);
   const [galatSimpan, setGalatSimpan] = useState<string | null>(null);
   const [menyimpan, setMenyimpan] = useState(false);
+  /* Tandai Lunas. Pesannya ditahan sampai struk berikutnya dibuka, supaya
+     kegagalan tidak menghilang bersama animasi yang berjalan sendiri. */
+  const [lunasSedang, setLunasSedang] = useState(false);
+  const [lunasPesan, setLunasPesan] = useState<{ ok: boolean; text: string } | null>(null);
+  /* Id baris yang sudah dibuang dari form lewat tombol hapus. Dikirim ke
+     `ubahStruk` sebagai `hapusIds` supaya barisnya benar-benar dihapus dari
+     `sale_items`, bukan hanya menghilang dari layar. */
+  const [hilang, setHilang] = useState<number[]>([]);
   /* Preview receipt lives in mode "cetak". Ref needed so "Cetak Ulang" can
      call its own print() — the button used to just setMode("cetak"), which
      was a no-op while already in that mode. */
@@ -167,20 +184,59 @@ export function StrukDrawer({
     setGalatSimpan(null);
     setPilihBuka(false);
     setCariMenu("");
+    setLunasPesan(null);
+    setHilang([]);
     setForm(formDariStruk(sale));
   }
 
-  const subtotal = form.lines.reduce((a, l) => a + l.price * l.qty, 0);
+  const subtotal = form.lines.reduce((a, l) => a + l.price * (Number(l.qty) || 0), 0);
   const ongkir = sale?.ongkir ?? 0;
   const diskon = sale?.diskon ?? 0;
   const totalBaru = Math.max(0, subtotal - diskon + ongkir);
   const totalLama = sale?.total ?? 0;
 
-  const ubahBaris = (i: number, patch: Partial<{ qty: number; price: number; note: string }>) =>
+  const ubahBaris = (i: number, patch: Partial<{ qty: number | ""; price: number; note: string }>) =>
     setForm((f) => ({
       ...f,
       lines: f.lines.map((l, idx) => (idx === i ? { ...l, ...patch } : l)),
     }));
+
+  /* Hapus eksplisit: barisnya langsung hilang dari daftar, bukan dijadikan
+     qty 0. Kasir yang salah pilih menu (tertekan B padahal maksudnya A)
+     harus bisa membuang barisnya dan memilih ulang dari pemilih menu,
+     persis urutan kerja itu.
+     Baris lama dicatat `hilang` supaya `ubahStruk` menghapusnya dari
+     `sale_items` saat Simpan — baris yang dibuang diam-diam dari form tanpa
+     tanda itu tidak akan pernah berhenti ada di database. Baris baru belum
+     ada di server, jadi cukup hilang dari form. */
+  const hapusBaris = (i: number) => {
+    const l = form.lines[i];
+    if (!l) return;
+    if (!l.baru && l.id > 0) {
+      setHilang((h) => (h.includes(l.id) ? h : [...h, l.id]));
+    }
+    setForm((f) => ({ ...f, lines: f.lines.filter((_, idx) => idx !== i) }));
+  };
+
+  /* Tandai lunas tanpa mengetik nominal di Piutang. Hasilnya ditampilkan di
+     tempat; status Pill ikut berubah begitu penulisnya menyegarkan rentang. */
+  const tandaiLunas = async () => {
+    if (!sale || !onLunas || lunasSedang) return;
+    setLunasPesan(null);
+    setLunasSedang(true);
+    try {
+      const hasil = await onLunas(sale);
+      setLunasPesan(
+        hasil.ok
+          ? { ok: true, text: "Pelunasan dicatat — struk ini sekarang Lunas." }
+          : { ok: false, text: hasil.pesan },
+      );
+    } catch (e) {
+      setLunasPesan({ ok: false, text: `Gagal mencatat pelunasan: ${(e as Error).message}` });
+    } finally {
+      setLunasSedang(false);
+    }
+  };
 
   /* Item yang tidak tercatat saat transaksi dulu — pelanggan menambah satu
      menu lewat chat, kasir lupa memasukkannya. Tanpa ini satu-satunya jalan
@@ -231,7 +287,9 @@ export function StrukDrawer({
         diskon,
         lines: form.lines.map((l) => ({
           id: l.id,
-          qty: l.qty,
+          /* "" (kotak yang kosong) sama dengan 0: barisnya nanti dibuang
+             aturan qty 0 yang sudah ada. */
+          qty: Number(l.qty) || 0,
           price: l.price,
           note: l.note,
           /* Hanya baris baru yang dibawa; baris lama cukup id karena PATCH
@@ -242,11 +300,17 @@ export function StrukDrawer({
           productClientId: l.productClientId,
           variantClientId: l.variantClientId,
         })),
+        /* Baris yang dihapus lewat tombol: dikirim terpisah supaya server
+           menghapus barisnya dari sale_items juga. */
+        hapusIds: hilang,
       });
       if (!hasil.ok) {
         setGalatSimpan(hasil.pesan ?? "Gagal menyimpan perubahan.");
         return;
       }
+      /* antrean hapus kosong lagi — daftar yang tersimpan sudah sama dengan
+         state di layar, dan menekan Simpan kedua tidak boleh mengulang DELETE. */
+      setHilang([]);
       /* Total naik = `paid_amount` jadi lebih kecil dari total, jadi struk
          berbalik jadi "Belum Lunas". Diberi tahu di sini, bukan dibiarkan
          muncul sendiri di tabel tanpa penjelasan. */
@@ -478,7 +542,7 @@ export function StrukDrawer({
                             </span>
                           </span>
                           <span className="shrink-0 text-sm font-semibold figure">
-                            {rupiah(l.price * l.qty)}
+                            {rupiah(l.price * (Number(l.qty) || 0))}
                           </span>
                         </li>
                       ))}
@@ -514,6 +578,37 @@ export function StrukDrawer({
                       </div>
                       <Line label="Dibayar dengan" value={sale.payment} />
                     </dl>
+
+                    {/* Tandai lunas dari sini, tanpa pindah ke halaman
+                        Piutang dan mengetik nominalnya lagi. Sisa yang
+                        tercatat dihitung server, bukan dari total di layar
+                        — struk dengan cicilan sebagian tetap tertangani
+                        dengan benar. */}
+                    {onLunas && sale.status === "belum" && (
+                      <div className="mt-2">
+                        <button
+                          type="button"
+                          onClick={() => void tandaiLunas()}
+                          disabled={lunasSedang || sedangProses}
+                          className={btnPrimary + " w-full disabled:opacity-40"}
+                        >
+                          {lunasSedang ? "Menyimpan…" : "Tandai Lunas"}
+                        </button>
+                        {lunasPesan && (
+                          <p
+                            role="alert"
+                            className={
+                              "mt-1.5 rounded-2xl px-3.5 py-2.5 text-xs font-medium " +
+                              (lunasPesan.ok
+                                ? "bg-primary/10 text-primary"
+                                : "bg-destructive/10 text-destructive")
+                            }
+                          >
+                            {lunasPesan.text}
+                          </p>
+                        )}
+                      </div>
+                    )}
                   </section>
 
                   <section>
@@ -603,9 +698,42 @@ export function StrukDrawer({
                                   {l.variant}
                                 </span>
                               )}
+                              {(Number(l.qty) || 0) <= 0 && (
+                                <span className="ml-1.5 text-[10px] font-bold uppercase text-destructive">
+                                  dibuang
+                                </span>
+                              )}
                             </span>
+                            {/* Hapus item eksplisit, di samping angka subtotal
+                                barisnya. Menyetel qty ke 0 saja tidak jelas
+                                maknanya; tong sampah menyampaikan niatnya
+                                langsung, dan peringatan di bawah masih
+                                memberi kesempatan membatalkan. */}
+                            <button
+                              type="button"
+                              aria-label={`Hapus ${l.name} dari struk`}
+                              title="Hapus item — dibuang saat disimpan"
+                              onClick={() => hapusBaris(i)}
+                              className={
+                                "shrink-0 text-muted-foreground transition-colors hover:text-destructive " +
+                                "disabled:opacity-40"
+                              }
+                            >
+                              <svg
+                                viewBox="0 0 24 24"
+                                fill="none"
+                                stroke="currentColor"
+                                strokeWidth={1.75}
+                                strokeLinecap="round"
+                                strokeLinejoin="round"
+                                className="h-4 w-4"
+                                aria-hidden="true"
+                              >
+                                <path d="M4 7h16M9 7V5h6v2M6 7l1 13h10l1-13M10 11v6M14 11v6" />
+                              </svg>
+                            </button>
                             <span className="shrink-0 text-xs font-semibold figure">
-                              {formatRupiah(l.price * l.qty)}
+                              {formatRupiah(l.price * (Number(l.qty) || 0))}
                             </span>
                           </div>
                           <div className="mt-1.5 flex items-center gap-2">
@@ -618,8 +746,17 @@ export function StrukDrawer({
                                 type="number"
                                 min={0}
                                 step="1"
-                                value={l.qty}
-                                onChange={(e) => ubahBaris(i, { qty: Number(e.target.value) || 0 })}
+                                /* "" ditampilkan apa adanya: membersihkan
+                                   kotak lalu mengetik ulang angkanya harus
+                                   bisa. Memaksa 0 berarti backspace langsung
+                                   dijejal angka dan angka lama menempel. */
+                                value={l.qty === "" ? "" : l.qty}
+                                placeholder="0"
+                                onChange={(e) =>
+                                  ubahBaris(i, {
+                                    qty: e.target.value === "" ? "" : Number(e.target.value),
+                                  })
+                                }
                                 className="h-9 w-full rounded-lg border border-input bg-card px-2 text-right text-sm figure outline-none focus:border-ring"
                               />
                             </label>
@@ -805,9 +942,9 @@ export function StrukDrawer({
                       items: form.lines.map((l) => ({
                         name: l.name,
                         variant: l.variant,
-                        qty: l.qty,
+                        qty: Number(l.qty) || 0,
                         price: l.price,
-                        lineTotal: l.price * l.qty,
+                        lineTotal: l.price * (Number(l.qty) || 0),
                         note: l.note,
                       })),
                     }}

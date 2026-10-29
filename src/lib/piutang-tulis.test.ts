@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { batalkanLunasPiutang, catatPembayaranPiutang } from "@/lib/piutang-tulis";
+import { batalkanLunasPiutang, catatPembayaranPiutang, lunasKanPiutang } from "@/lib/piutang-tulis";
 
 /* ==========================================================================
    Bukti rollback untuk catat pembayaran piutang.
@@ -124,6 +124,50 @@ describe("catatPembayaranPiutang", () => {
     }) as unknown as typeof fetch;
 
     const hasil = await catatPembayaranPiutang(7, 50_000);
+    expect(hasil.ok).toBe(false);
+    if (!hasil.ok) expect(hasil.pesan).toMatch(/lunas/i);
+  });
+});
+
+/* ==========================================================================
+    lunasKanPiutang — penandaan lunas dari Detail Struk.
+
+    Yang dijaga: nominal yang ditulis ke sale_payments adalah SISA, bukan
+    total — struk yang terlanjur dibayar separuh tidak boleh menulis cicilan
+    yang sudah ada lagi.
+    ========================================================================== */
+
+describe("lunasKanPiutang", () => {
+  it("mencatat pembayaran sebanyak sisa, tanpa deposit", async () => {
+    const p = tiru();
+    const hasil = await lunasKanPiutang(7);
+    expect(hasil.ok).toBe(true);
+
+    /* POST sale_payments: nominalnya sisa (100.000 dari total 100.000 yang
+       belum dibayar sedikit pun), bukan jumlah rekaan yang lebih besar. */
+    const tulis = JSON.parse(p.filter((x) => x.method === "POST" && x.url.includes("sale_payments"))[0].body!);
+    expect(tulis.amount).toBe(100_000);
+
+    /* PATCH sales: paid_amount naik menjadikan sisa nol. */
+    const patchStruk = p.filter((x) => x.method === "PATCH" && x.url.includes("/rest/v1/sales"));
+    expect(JSON.parse(patchStruk[0].body!).paid_amount).toBe(100_000);
+  });
+
+  it("menolak struk yang sudah lunas tanpa menulis apa pun", async () => {
+    globalThis.fetch = vi.fn(async (input: string | URL, init?: RequestInit) => {
+      const url = String(input);
+      const method = init?.method ?? "GET";
+      if (method === "GET" && url.includes("/rest/v1/sales?")) {
+        return {
+          ok: true,
+          status: 200,
+          json: async () => [{ id: 7, total: 100_000, paid_amount: 100_000, customer_name: "X", receipt_no: "SH-1" }],
+        };
+      }
+      return { ok: true, status: 200, json: async () => [] };
+    }) as unknown as typeof fetch;
+
+    const hasil = await lunasKanPiutang(7);
     expect(hasil.ok).toBe(false);
     if (!hasil.ok) expect(hasil.pesan).toMatch(/lunas/i);
   });

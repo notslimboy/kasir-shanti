@@ -10,6 +10,7 @@ import { Modal } from "@/components/ui/modal";
 import { Toast, useToast } from "@/components/ui/toast";
 import { PageHeader, StatTile, Tabs, btnGhost, inputClass } from "@/components/ui/kit";
 import { delayDaftar } from "@/components/list-motion";
+import { SortableTh, urutkan, useUrutan } from "@/components/ui/sortable-table";
 import {
   ambilDetailPiutang,
   filterPiutang,
@@ -152,25 +153,45 @@ export function PiutangPage() {
 
   const rows = useMemo(() => filterPiutang(semua, tab, q), [semua, tab, q]);
 
-  /* Baris yang benar-benar dirender: `rows` dipotong jadi `tampil`.
+  /* Sort kolom tabel — dijalankan SETELAH filter, SEBELUM dipotong,
+     supaya "Pilih semua" tetap membaca seluruh hasil (bukan hanya yang
+     tampil) dan inkremental render tetap konsisten dengan urutan. */
+  const { urutan, toggle } = useUrutan();
+  const terurut = useMemo(
+    () =>
+      urutkan(rows, urutan, (p, kolom) => {
+        if (kolom === "customer") return p.customer;
+        if (kolom === "invoice") return p.invoice;
+        if (kolom === "date") return p.date;
+        if (kolom === "total") return p.total;
+        if (kolom === "paid") return p.paid;
+        if (kolom === "sisa") return p.sisa;
+        if (kolom === "status") return p.status;
+        return p.invoice;
+      }),
+    [rows, urutan],
+  );
 
-     Dipotong, bukan disaring: `rows` tetap memuat seluruh hasil filter,
-     jadi "Pilih semua" masih menagih semua tagihan yang cocok — bukan
-     cuma 100 yang kebetulan sudah terlihat. */
-  const terlihat = useMemo(() => rows.slice(0, tampil), [rows, tampil]);
-  const sisa = rows.length - terlihat.length;
+  /* Baris yang benar-benar dirender: `terurut` dipotong jadi `tampil`.
+
+     Dipotong, bukan disaring: `terurut` tetap memuat seluruh hasil
+     filter+sort, jadi "Pilih semua" masih menagih semua tagihan yang
+     cocok — bukan cuma 100 yang kebetulan sudah terlihat. */
+  const terlihat = useMemo(() => terurut.slice(0, tampil), [terurut, tampil]);
+  const sisa = terurut.length - terlihat.length;
 
   /* Kembali ke halaman pertama kalau filter berubah (ganti tab, ketik
      di kolom cari) atau datanya diganti. Tanpa ini, buka tab "Semua"
      setelah menjelajah 300 baris akan langsung me-render 300 baris
      lagi — persis lag yang harus dihindari.
 
-     dependensi `rows` (bukan `tab`/`q`): `rows` adalah hasil filter,
-     jadi satu perubahan sudah mencakup ganti tab, ubah pencarian, dan
-     data baru dari server, tanpa perlu mendaftarkan tiap sumbernya. */
+     dependensi `terurut` (bukan `tab`/`q`): `terurut` adalah hasil
+     filter + sort, jadi satu perubahan sudah mencakup ganti tab, ubah
+     pencarian, ganti urutan, dan data baru dari server, tanpa perlu
+     mendaftarkan tiap sumbernya. */
   useEffect(() => {
     setTampil(UKURAN_HALAMAN);
-  }, [rows]);
+  }, [terurut]);
 
   /* Muat 100 berikutnya saat sentinel menyentuh viewport.
 
@@ -517,13 +538,13 @@ export function PiutangPage() {
                 <th className="w-8 pb-2">
                   <span className="sr-only">Pilih</span>
                 </th>
-                <th className="pb-2 font-semibold">Customer</th>
-                <th className="pb-2 font-semibold">No. Struk</th>
-                <th className="pb-2 font-semibold">Tanggal</th>
-                <th className="pb-2 pr-4 text-right font-semibold">Tagihan</th>
-                <th className="pb-2 pr-4 text-right font-semibold">Dibayar</th>
-                <th className="pb-2 pr-4 text-right font-semibold">Sisa</th>
-                <th className="pb-2 pl-4 font-semibold">Status</th>
+                <SortableTh kolom="customer" urutan={urutan} onToggle={toggle} className="pb-2 uppercase tracking-wider">Customer</SortableTh>
+                <SortableTh kolom="invoice" urutan={urutan} onToggle={toggle} className="pb-2 uppercase tracking-wider">No. Struk</SortableTh>
+                <SortableTh kolom="date" urutan={urutan} onToggle={toggle} className="pb-2 uppercase tracking-wider">Tanggal</SortableTh>
+                <SortableTh kolom="total" urutan={urutan} onToggle={toggle} align="right" className="pb-2 pr-4 uppercase tracking-wider">Tagihan</SortableTh>
+                <SortableTh kolom="paid" urutan={urutan} onToggle={toggle} align="right" className="pb-2 pr-4 uppercase tracking-wider">Dibayar</SortableTh>
+                <SortableTh kolom="sisa" urutan={urutan} onToggle={toggle} align="right" className="pb-2 pr-4 uppercase tracking-wider">Sisa</SortableTh>
+                <SortableTh kolom="status" urutan={urutan} onToggle={toggle} className="pb-2 pl-4 uppercase tracking-wider">Status</SortableTh>
                 <th className="pb-2 text-right font-semibold">Aksi</th>
               </tr>
             </thead>
