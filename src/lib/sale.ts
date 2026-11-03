@@ -54,6 +54,12 @@ export type Sale = {
   /** Tidak ada kolomnya di database — selalu undefined sampai sumbernya
       ditambahkan. Jangan diisi dari tebakan. */
   courier?: string;
+  /** Tag area untuk drawer — tidak dari database, diisi dari `tagUntukNama()`
+       oleh halaman yang membuka drawer. */
+  tag?: string;
+  /** Kolom sales.queue_no — nomor urut yang tercetak di struk. Disimpan
+      supaya cetak ulang memakai nomor asli, bukan nomor baru. */
+  queueNo?: number | null;
   ongkir?: number;
   diskon?: number;
   lines: SaleLine[];

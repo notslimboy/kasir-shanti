@@ -69,7 +69,7 @@ const DASAR = {
 };
 
 describe("ubahStruk — header", () => {
-  it("menulis customer_name, send_note, subtotal, dan total", async () => {
+  it("menulis customer_name, send_note, subtotal, discount, dan total", async () => {
     const hasil = await ubahStruk({
       ...DASAR,
       lines: [{ id: 11, qty: 2, price: 20_000, note: "tanpa lombok" }],
@@ -81,6 +81,7 @@ describe("ubahStruk — header", () => {
     expect(patch!.body.customer_name).toBe("Uji");
     expect(patch!.body.send_note).toBe("saos bnyakin");
     expect(patch!.body.subtotal).toBe(40_000);
+    expect(patch!.body.discount).toBe(0);
     expect(patch!.body.total).toBe(40_000);
   });
 
@@ -93,26 +94,48 @@ describe("ubahStruk — header", () => {
     expect(patch!.body).not.toHaveProperty("paid_amount");
   });
 
-  it("total memakai formula yang sama dengan simpanPenjualan", async () => {
+  it("total = subtotal + ongkir, dan discount di-PATCH dengan ongkir", async () => {
     const hasil = await ubahStruk({
       ...DASAR,
       ongkir: 15_000,
       diskon: 5_000,
       lines: [{ id: 11, qty: 3, price: 35_000, note: "" }],
     });
-    /* subtotal 105.000 − diskon 5.000 + ongkir 15.000 = 115.000 */
+    /* subtotal 105.000 + ongkir 15.000 = 120.000 (diskon 5.000 tidak
+       ikut dihitung — kolom discount dipakai untuk ongkir). */
     expect(hasil.subtotal).toBe(105_000);
-    expect(hasil.total).toBe(115_000);
+    expect(hasil.total).toBe(120_000);
+
+    const patch = panggil.find((p) => p.method === "PATCH" && p.url.includes("/sales?"));
+    expect(patch!.body.discount).toBe(15_000);
   });
 
-  it("total tidak pernah minus, walau diskon melebihi subtotal", async () => {
+  it("total = subtotal + ongkir, diskon tidak ikut dihitung", async () => {
     const hasil = await ubahStruk({
       ...DASAR,
       ongkir: 0,
       diskon: 999_999,
       lines: [{ id: 11, qty: 1, price: 10_000, note: "" }],
     });
-    expect(hasil.total).toBe(0);
+    /* diskon 999.999 tidak memengaruhi total — kolom discount dipakai
+       untuk ongkir, dan ongkir 0, jadi total = subtotal. */
+    expect(hasil.total).toBe(10_000);
+  });
+
+  it("discount di-PATCH dengan ongkir, sehingga ongkirDari() balik sesuai", async () => {
+    await ubahStruk({
+      ...DASAR,
+      ongkir: 15_000,
+      diskon: 0,
+      lines: [{ id: 11, qty: 2, price: 50_000, note: "" }],
+    });
+    const patch = panggil.find((p) => p.method === "PATCH" && p.url.includes("/sales?"));
+    expect(patch!.body.discount).toBe(15_000);
+    expect(patch!.body.subtotal).toBe(100_000);
+    expect(patch!.body.total).toBe(115_000);
+    /* ongkirDari(total=115.000, subtotal=100.000, discount=15.000, tax=0) = 15.000 */
+    const { ongkirDari } = await import("./live-mappers");
+    expect(ongkirDari(patch!.body as unknown as Parameters<typeof ongkirDari>[0])).toBe(15_000);
   });
 
   it("NaN di harga tidak membuat seluruh total NaN", async () => {

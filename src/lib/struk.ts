@@ -119,6 +119,7 @@ export type DataStruk = {
   customerName: string;
   chatDate: string;
   queueNo?: number | string | null;
+  kurir?: string;
   sendNote: string;
   subtotal: number;
   shipping: number;
@@ -205,9 +206,13 @@ export function strukHtml(data: DataStruk, setelan: SetelanStruk = STRUK_DEFAULT
       ${kompak ? "" : `<p class="receipt-store-address">${escapeHtml(alamatToko).replace(/\n/g, "<br>")}</p>`}
     </header>`;
 
+  const kurir = String(data.kurir ?? "").trim();
   const infoPesanan = [
     customer
       ? `<div class="receipt-info receipt-customer"><strong class="receipt-customer-name">${escapeHtml(customer)}</strong></div>`
+      : "",
+    kurir
+      ? `<div class="receipt-info receipt-kurir"><strong>Dikirim oleh: ${escapeHtml(kurir)}</strong></div>`
       : "",
     antre
       ? `<div class="receipt-info receipt-queue"><strong>NO: ${escapeHtml(antre)}</strong></div>`
@@ -343,6 +348,14 @@ body { margin: 0; background: #f3f4f6; }
 .receipt-item { margin-bottom: 3mm; break-inside: avoid; page-break-inside: avoid; }
 .receipt-item-name { font-weight: 900; line-height: 1.22; overflow-wrap: anywhere; word-break: break-word; }
 .receipt-small { font-size: var(--receipt-small-font-size); }
+.receipt-kurir {
+  margin: 1.5mm 0;
+  font-size: var(--receipt-font-size);
+  font-weight: 900;
+  line-height: 1.22;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
 .receipt-send-note {
   margin: 1.5mm 0 0;
   font-size: var(--receipt-font-size);

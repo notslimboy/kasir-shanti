@@ -185,6 +185,7 @@ export function mapStruk(row: SaleRow, items: SaleItemRow[] = []): Sale {
        di sini, lalu struk-drawer mengisinya dengan string kosong. Akibatnya
        "CATATAN KIRIM" yang ada di struk asli hilang begitu di-cetak ulang. */
     sendNote: String(row.send_note ?? "").trim() || undefined,
+    queueNo: row.queue_no ?? null,
     courier: undefined, // tidak ada kolomnya di tabel sales
     ongkir: ongkirDari(row),
     diskon: n(row.discount),

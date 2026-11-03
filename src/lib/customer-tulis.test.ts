@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { idNumerikCustomer } from "@/lib/page-data";
-import { ubahCustomer } from "@/lib/supabase-tulis";
+import { tagCustomer, ubahCustomer } from "@/lib/supabase-tulis";
 
 /* Dua hal yang dikunci file ini:
 
@@ -207,5 +207,151 @@ describe("ubahCustomer", () => {
     const hasil = await ubahCustomer(input);
     expect(hasil.ok).toBe(false);
     if (!hasil.ok) expect((hasil.judul ?? "").length).toBeGreaterThan(0);
+  });
+});
+
+/* ==========================================================================
+   tagCustomer
+   ========================================================================== */
+
+/* Helper: daftar customer palsu. */
+const CUSTOMER_LIST = [
+  { id: 42, name: "Anis BTH", tag: null },
+  { id: 99, name: "Bambang", tag: "Sutorejo" },
+];
+
+/* Helper: build mock fetch that handles GET /customers (list), PATCH, POST. */
+function mockCustomerFetch(options: {
+  /** Daftar customer yang dikembalikan GET /rest/v1/customers?select=id,name,tag */
+  daftar?: { id: number; name: string; tag: string | null }[];
+  /** Apakah POST berhasil (201) atau gagal (409) */
+  postConflict?: boolean;
+}) {
+  const panggilan: { method: string; url: string; body?: unknown }[] = [];
+  const fn = vi.fn(async (url: string, init?: RequestInit) => {
+    const method = init?.method ?? "GET";
+    const bodyStr = typeof init?.body === "string" ? init.body : "{}";
+    panggilan.push({ method, url, body: bodyStr ? JSON.parse(bodyStr) : undefined });
+    if (method === "GET" && url.includes("select=id,name,tag")) {
+      return {
+        ok: true,
+        status: 200,
+        json: async () => (options.daftar ?? CUSTOMER_LIST),
+      };
+    }
+    if (method === "PATCH" && url.includes("/rest/v1/customers?id=eq.")) {
+      return {
+        ok: true,
+        status: 200,
+        json: async () => [{ id: 1 }],
+      };
+    }
+    if (method === "POST") {
+      if (options.postConflict) {
+        return {
+          ok: false,
+          status: 409,
+          json: async () => ({
+            code: "23505",
+            message: 'duplicate key value violates unique constraint "customers_name_key"',
+          }),
+        };
+      }
+      return {
+        ok: true,
+        status: 201,
+        json: async () => [{ id: 999 }],
+      };
+    }
+    return { ok: false, status: 404, json: async () => ({}) };
+  });
+  globalThis.fetch = fn as unknown as typeof fetch;
+  return panggilan;
+}
+
+describe("tagCustomer", () => {
+  afterEach(() => {
+    globalThis.fetch = ASLI_FETCH;
+    vi.restoreAllMocks();
+  });
+
+  it("customer ada → PATCH tag", async () => {
+    const panggilan = mockCustomerFetch({});
+    const hasil = await tagCustomer("Anis BTH", "Pakuwon");
+
+    expect(hasil.ok).toBe(true);
+    /* GET daftar dulu, lalu PATCH. */
+    const patch = panggilan.find((p) => p.method === "PATCH");
+    expect(patch).toBeTruthy();
+    expect(patch!.url).toContain("/rest/v1/customers?id=eq.42");
+    expect((patch!.body as Record<string, unknown>).tag).toBe("Pakuwon");
+  });
+
+  it("customer tidak ada → POST dibuat dengan tag", async () => {
+    const panggilan = mockCustomerFetch({ daftar: [] });
+    const hasil = await tagCustomer("Baru Coba", "GOJEK");
+
+    expect(hasil.ok).toBe(true);
+    const post = panggilan.find((p) => p.method === "POST");
+    expect(post).toBeTruthy();
+    const body = post!.body as Record<string, unknown>;
+    expect(body.name).toBe("Baru Coba");
+    expect(body.tag).toBe("GOJEK");
+    expect(body.deposit_balance).toBe(0);
+    expect(body.default_shipping).toBe(0);
+  });
+
+  it("POST 409 → cari ulang + PATCH tag", async () => {
+    /* Skenario: GET pertama tidak menemukan "Anis BTH" (belum ada),
+       POST gagal 409 karena request lain mendaftarkannya duluan,
+       GET kedua menemukan barisnya lalu PATCH tag-nya. */
+    const panggilan: { method: string; url: string; body?: unknown }[] = [];
+    let getKe = 0;
+    globalThis.fetch = vi.fn(async (url: string, init?: RequestInit) => {
+      const method = init?.method ?? "GET";
+      const bodyStr = typeof init?.body === "string" ? init.body : "{}";
+      panggilan.push({ method, url, body: bodyStr ? JSON.parse(bodyStr) : undefined });
+      if (method === "GET" && url.includes("select=id,name,tag")) {
+        getKe++;
+        /* Pertama: daftar kosong (customer belum ada). Kedua: sudah ada. */
+        const daftar = getKe === 1 ? [] : CUSTOMER_LIST;
+        return {
+          ok: true, status: 200,
+          json: async () => daftar,
+        };
+      }
+      if (method === "PATCH") {
+        return { ok: true, status: 200, json: async () => [{ id: 1 }] };
+      }
+      if (method === "POST") {
+        return {
+          ok: false, status: 409,
+          json: async () => ({
+            code: "23505",
+            message: 'duplicate key value violates unique constraint "customers_name_key"',
+          }),
+        };
+      }
+      return { ok: false, status: 404, json: async () => ({}) };
+    }) as unknown as typeof fetch;
+    const hasil = await tagCustomer("Anis BTH", "ITS");
+
+    expect(hasil.ok).toBe(true);
+    const getDaftar = panggilan.filter((p) => p.method === "GET" && p.url.includes("select=id,name,tag"));
+    expect(getDaftar.length).toBe(2);
+    const patch = panggilan.find((p) => p.method === "PATCH");
+    expect(patch).toBeTruthy();
+    expect(patch!.url).toContain("/rest/v1/customers?id=eq.42");
+    expect((patch!.body as Record<string, unknown>).tag).toBe("ITS");
+  });
+
+  it("nama kosong → tidak ada request", async () => {
+    const spy = vi.fn();
+    globalThis.fetch = spy as unknown as typeof fetch;
+
+    const hasil = await tagCustomer("  ", "Sutorejo");
+
+    expect(hasil.ok).toBe(false);
+    expect(spy).not.toHaveBeenCalled();
   });
 });

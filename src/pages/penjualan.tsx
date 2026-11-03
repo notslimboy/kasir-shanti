@@ -19,6 +19,7 @@ import {
   hapusStruk,
   hapusStrukPermanen,
   restoreStruk,
+  tagCustomer,
   ubahStruk,
   type HasilUbah,
   type UbahStrukInput,
@@ -38,7 +39,7 @@ import { DateRangePicker, presetRentang, type DateRange } from "@/components/ui/
 import { rupiah, rupiahShort } from "@/lib/format";
 import type { Sale } from "@/lib/sale";
 import { menuTerlarisDari, trenPerHari, trenPerJam } from "@/lib/ringkasan";
-import { grupPerKurir, kurirDariTag, rekapOngkirPerKurir } from "@/lib/kurir";
+import { grupPerKurir, kurirDariTag, KURIR_GROUPS, rekapOngkirPerKurir } from "@/lib/kurir";
 import { cetakLaporan } from "@/lib/cetak-laporan";
 import { exportPenjualanCsv } from "@/lib/export-penjualan";
 import { usePintasan } from "@/lib/use-pintasan";
@@ -494,6 +495,18 @@ export function PenjualanPage() {
     }
   };
 
+  /* Ubah tag alamat di master customer. Dipanggil dari drawer saat kasir
+     mengganti tag lewat form Ubah Data. Kalau nama tidak ada di master,
+     dibuat otomatis — tidak perlu mengimpor customer dulu.
+     Setelah sukses, `perbaruiSetelahTulis` menyegarkan data customer
+     dan tagUntukNama, jadi baris "Kurir" di drawer langsung berubah. */
+  const ubahTagStruk = async (nama: string, tag: string): Promise<{ ok: boolean; pesan?: string }> => {
+    const hasil = await tagCustomer(nama, tag);
+    if (!hasil.ok) return hasil;
+    await data.perbaruiSetelahTulis();
+    return { ok: true };
+  };
+
   /* Grafik memakai struk yang sedang tampil, jadi grafik dan tabel di bawahnya
      tidak mungkin beda.
      Per jam HANYA untuk rentang satu hari — untuk rentang seminggu atau
@@ -558,6 +571,21 @@ export function PenjualanPage() {
     () => buildKitchenOrderTicket(struk, effectiveRange.from, effectiveRange.to),
     [struk, effectiveRange],
   );
+
+  /* Opsi tag untuk dropdown Tag Alamat di drawer: gabungan unik dari tag
+     customer yang tidak kosong + tag dari KURIR_GROUPS, diurutkan. */
+  const opsiTag = useMemo(() => {
+    const set = new Set<string>();
+    for (const c of data.customers) {
+      if (c.tag?.trim()) set.add(c.tag.trim());
+    }
+    for (const g of KURIR_GROUPS) {
+      for (const t of g.tags) {
+        if (t.trim()) set.add(t.trim());
+      }
+    }
+    return [...set].sort((a, b) => a.localeCompare(b, "id-ID"));
+  }, [data.customers]);
 
   /* Label rentang untuk judul laporan: "Hari ini, Rabu, 30 September 2026"
      untuk satu hari, "… - …" untuk rentang. Format ini ikut formatDateLabel
@@ -1260,7 +1288,7 @@ export function PenjualanPage() {
       </Card>
 
       <StrukDrawer
-        sale={strukAktif}
+        sale={strukAktif ? { ...strukAktif, tag: tagUntukNama(strukAktif.customer) } : null}
         onClose={() => setStrukAktif(null)}
         /* Void dari drawer tidak langsung menulis: yang dipanggil hanya
            membuka konfirmasi. Menulis dari dalam drawer tanpa konfirmasi
@@ -1270,6 +1298,7 @@ export function PenjualanPage() {
         onHapusPermanen={(s) => setKonfirmasiPermanen(s)}
         onSimpan={simpanUbah}
         onLunas={tandaiLunas}
+        onUbahTag={ubahTagStruk}
         /* Katalog menu dimuat saat diminta, bukan saat halaman dibuka:
            Penjualan tidak butuh 1.095 produk untuk menampilkan tabel struk,
            dan menunggu katalognya berarti menunggu tanpa alasan. */
@@ -1278,6 +1307,7 @@ export function PenjualanPage() {
         produkDimuat={data.produkDimuat}
         produkMemuat={data.produkMemuat}
         sedangProses={strukAktif !== null && sedangProses === strukAktif.id}
+        opsiTag={opsiTag}
       />
 
       {/* Konfirmasi hapus.

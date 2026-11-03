@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import "@testing-library/jest-dom/vitest";
 import { cleanup, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
@@ -362,6 +362,39 @@ describe("Ubah Data di drawer struk", () => {
     /* 99.000 + 10.000. The old total must not survive an edit. */
     expect(data.total).toBe(109_000);
   });
+
+  it("Ongkir bisa diedit dan dikirim ke server", async () => {
+    await bukaEdit();
+    /* Cari input ongkir — aria-label-nya "Ongkir". */
+    const ongkirInput = screen.getByLabelText("Ongkir");
+    expect(ongkirInput).toBeInTheDocument();
+    /* Sale_BERNOTE punya ongkir 0, jadi mulainya 0 (InputRupiah format: ""). */
+    expect(ongkirInput).toHaveValue("");
+
+    await userEvent.clear(ongkirInput);
+    await userEvent.type(ongkirInput, "15000");
+
+    await userEvent.click(screen.getByRole("button", { name: /^Simpan$/i }));
+    await waitFor(() => expect(simpanMock).toHaveBeenCalled());
+    expect(simpanMock.mock.calls[0]![0].ongkir).toBe(15_000);
+  });
+
+  it("pratinjau Cetak Ulang memakai nomor antrean asli (queueNo)", async () => {
+    const SALE_DENGAN_ANTRE: Sale = { ...SALE_BERNOTE, queueNo: 30 };
+    render(<Drawer sale={SALE_DENGAN_ANTRE} onClose={() => {}} onSimpan={simpanMock} />);
+    await masukModeCetak();
+
+    const data = JSON.parse((await screen.findByTestId("struk-data")).textContent ?? "{}");
+    expect(data.queueNo).toBe(30);
+  });
+
+  it("pratinjau Cetak Ulang null untuk queueNo jika tidak ada", async () => {
+    render(<Drawer sale={SALE_BERNOTE} onClose={() => {}} onSimpan={simpanMock} />);
+    await masukModeCetak();
+
+    const data = JSON.parse((await screen.findByTestId("struk-data")).textContent ?? "{}");
+    expect(data.queueNo).toBeNull();
+  });
 });
 
 /* -------------------------------------------------------------------------
@@ -520,5 +553,172 @@ describe("Tambah item di form Ubah Data", () => {
 
     expect(screen.queryByText(/Memuat daftar menu/)).toBeNull();
     expect(screen.getByText(/Daftar menu kosong/)).toBeInTheDocument();
+  });
+});
+
+/* -------------------------------------------------------------------------
+   Tag Alamat — tampil di rincian, bisa diedit, kurir otomatis.
+   -------------------------------------------------------------------------- */
+
+describe("Tag Alamat di drawer struk", () => {
+  beforeAll(() => {
+    /* jsdom tidak punya scrollIntoView; Select memanggilnya saat dropdown
+       dibuka. Stub supaya tes dropdown Tag Alamat tidak crash. */
+    Element.prototype.scrollIntoView ??= () => {};
+  });
+
+  const ubahTagMock = vi.fn<(nama: string, tag: string) => Promise<{ ok: boolean; pesan?: string }>>();
+  const SALE_TAG: Sale = {
+    ...SALE,
+    tag: "ITS",
+    customer: "Anis BTH",
+    lines: [{ name: "Nasi", variant: "Normal", qty: 1, price: 10_000 }],
+  };
+
+  beforeEach(() => {
+    ubahTagMock.mockReset();
+    ubahTagMock.mockResolvedValue({ ok: true });
+  });
+
+  it("menampilkan Tag Alamat di rincian Pengiriman", () => {
+    render(<Drawer sale={SALE_TAG} onClose={() => {}} />);
+    expect(screen.getByText(/Tag Alamat/)).toBeInTheDocument();
+    expect(screen.getByText(/ITS/)).toBeInTheDocument();
+  });
+
+  it("menampilkan tanda hubung untuk tag kosong", () => {
+    render(<Drawer sale={SALE} onClose={() => {}} />);
+    /* Ada dua —: Alamat dan Tag Alamat. Cari saja Tag Alamat-nya. */
+    const baris = screen.getByText(/Tag Alamat/);
+    expect(baris).toBeInTheDocument();
+    /* Dd dengan Tag Alamat tepat di samping dt-nya. */
+    const dl = baris.closest("dl")!;
+    const dds = Array.from(dl.querySelectorAll("dd"));
+    const tagAlamat = dds.find((_, i) => {
+      const dts = Array.from(dl.querySelectorAll("dt"));
+      return i > 0 && dts[i]?.textContent === "Tag Alamat";
+    }) ?? dds[2]; /* urutan: Customer, Alamat, Tag Alamat, Kurir */
+    expect(tagAlamat?.textContent?.trim()).toBe("—");
+  });
+
+  it("Kurir terisi dari tag (ITS → Raka/Vendi)", () => {
+    render(<Drawer sale={SALE_TAG} onClose={() => {}} />);
+    expect(screen.getByText(/Kurir/)).toBeInTheDocument();
+    expect(screen.getByText(/Raka.Vendi/)).toBeInTheDocument();
+  });
+
+  it("Kurir 'Ambil sendiri' untuk tag kosong", () => {
+    render(<Drawer sale={SALE} onClose={() => {}} />);
+    expect(screen.getByText(/Ambil sendiri/)).toBeInTheDocument();
+  });
+
+  it("input Tag Alamat muncul di mode edit kalau ada onUbahTag", async () => {
+    render(<Drawer sale={SALE_TAG} onClose={() => {}} onSimpan={simpanMock} onUbahTag={ubahTagMock} />);
+    await masukModeEdit();
+    expect(screen.getByLabelText(/Tag alamat/i)).toBeInTheDocument();
+  });
+
+  it("input Tag Alamat tidak muncul tanpa onUbahTag", async () => {
+    render(<Drawer sale={SALE_TAG} onClose={() => {}} onSimpan={simpanMock} />);
+    await masukModeEdit();
+    expect(screen.queryByLabelText(/Tag alamat/i)).toBeNull();
+  });
+
+  it("onUbahTag dipanggil saat tag berubah dan Simpan ditekan", async () => {
+    render(
+      <Drawer
+        sale={SALE_TAG}
+        onClose={() => {}}
+        onSimpan={simpanMock}
+        onUbahTag={ubahTagMock}
+        opsiTag={["Sutorejo"]}
+      />,
+    );
+    await masukModeEdit();
+
+    /* Buka dropdown Tag Alamat lalu pilih "Sutorejo" */
+    const tagSelect = screen.getByLabelText(/Tag alamat/i);
+    await userEvent.click(tagSelect);
+    await userEvent.click(screen.getByRole("option", { name: "Sutorejo" }));
+
+    await userEvent.click(screen.getByRole("button", { name: /^Simpan$/i }));
+    await waitFor(() => expect(ubahTagMock).toHaveBeenCalledWith("Anis BTH", "Sutorejo"));
+  });
+
+  it("onUbahTag tidak dipanggil kalau tag tidak berubah", async () => {
+    render(<Drawer sale={SALE_TAG} onClose={() => {}} onSimpan={simpanMock} onUbahTag={ubahTagMock} />);
+    await masukModeEdit();
+
+    /* Simpan tanpa mengubah tag */
+    await userEvent.click(screen.getByRole("button", { name: /^Simpan$/i }));
+    await waitFor(() => expect(simpanMock).toHaveBeenCalled());
+    expect(ubahTagMock).not.toHaveBeenCalled();
+  });
+
+  it("pesan gagal onUbahTag ditampilkan", async () => {
+    ubahTagMock.mockResolvedValue({ ok: false, pesan: "Customer tidak ditemukan." });
+
+    render(
+      <Drawer
+        sale={SALE_TAG}
+        onClose={() => {}}
+        onSimpan={simpanMock}
+        onUbahTag={ubahTagMock}
+        opsiTag={["GOJEK"]}
+      />,
+    );
+    await masukModeEdit();
+
+    const tagSelect = screen.getByLabelText(/Tag alamat/i);
+    await userEvent.click(tagSelect);
+    await userEvent.click(screen.getByRole("option", { name: "GOJEK" }));
+
+    await userEvent.click(screen.getByRole("button", { name: /^Simpan$/i }));
+    const alert = await screen.findByRole("alert");
+    expect(alert).toHaveTextContent(/Customer tidak ditemukan/i);
+  });
+
+  it("nilai tag lama yang tidak ada di opsiTag tetap muncul sebagai opsi terpilih", async () => {
+    /* SALE_TAG punya tag "ITS". opsiTag default [], tapi "ITS" harus tetap
+       terlihat sebagai opsi yang terpilih di dropdown karena kode tambahan
+       menambahkannya ke opsiTagOptions. */
+    render(
+      <Drawer
+        sale={SALE_TAG}
+        onClose={() => {}}
+        onSimpan={simpanMock}
+        onUbahTag={ubahTagMock}
+      />,
+    );
+    await masukModeEdit();
+
+    const tagSelect = screen.getByLabelText(/Tag alamat/i);
+    /* Trigger button harus menampilkan "ITS" sebagai nilai terpilih. */
+    expect(tagSelect).toHaveTextContent("ITS");
+  });
+
+  it("pratinjau Cetak Ulang memuat kurir dari tagForm", async () => {
+    render(
+      <Drawer
+        sale={SALE_TAG}
+        onClose={() => {}}
+        onSimpan={simpanMock}
+        onUbahTag={ubahTagMock}
+        opsiTag={["Sutorejo"]}
+      />,
+    );
+    await masukModeEdit();
+
+    const tagSelect = screen.getByLabelText(/Tag alamat/i);
+    await userEvent.click(tagSelect);
+    await userEvent.click(screen.getByRole("option", { name: "Sutorejo" }));
+
+    /* Kembali ke lihat, lalu buka cetak. */
+    await userEvent.click(screen.getByRole("button", { name: /^Kembali$/i }));
+    await waitFor(() => expect(screen.getByRole("button", { name: /Cetak Ulang/i })).toBeInTheDocument());
+    await masukModeCetak();
+
+    const data = JSON.parse((await screen.findByTestId("struk-data")).textContent ?? "{}");
+    expect(data.kurir).toBe("Yanto");
   });
 });

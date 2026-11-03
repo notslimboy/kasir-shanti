@@ -218,6 +218,16 @@ describe("mapStruk", () => {
     expect(s.completedOn).toMatch(/^2026-09-\d\d$/);
   });
 
+  it("queue_no dari database dipetakan ke queueNo", () => {
+    const s = mapStruk(struk());
+    expect(s.queueNo).toBe(53);
+  });
+
+  it("queueNo null-safe — null jika tidak ada queue_no", () => {
+    const s = mapStruk(struk({ queue_no: null }));
+    expect(s.queueNo).toBeNull();
+  });
+
   it("struk tanpa item tidak error", () => {
     const s = mapStruk(struk(), []);
     expect(s.itemCount).toBe(0);

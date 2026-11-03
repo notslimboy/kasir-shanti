@@ -236,6 +236,23 @@ describe("urutan baris struk", () => {
   });
 });
 
+describe("baris kurir di struk", () => {
+  it("menampilkan 'Dikirim oleh:' kalau kurir diisi", () => {
+    const h = rapikan(strukHtml(data({ kurir: "Yanto" })));
+    expect(h).toContain("Dikirim oleh: Yanto");
+  });
+
+  it("tidak menampilkan baris kurir kalau kosong", () => {
+    const h = rapikan(strukHtml(data({ kurir: "" })));
+    expect(h).not.toContain("Dikirim oleh");
+  });
+
+  it("tidak menampilkan baris kurir kalau undefined", () => {
+    const h = rapikan(strukHtml(data({})));
+    expect(h).not.toContain("Dikirim oleh");
+  });
+});
+
 describe("css struk", () => {
   it("memakai Courier New dan tebal, tanpa radius", () => {
     const css = cssStrukSafe();

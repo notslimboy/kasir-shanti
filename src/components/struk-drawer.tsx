@@ -6,8 +6,10 @@ import { Struk, type StrukHandle } from "@/components/struk";
 import { Pill } from "@/components/ui/card";
 import { btnGhost, btnPrimary, inputClass } from "@/components/ui/kit";
 import { IkonAksi, IkonHapusPermanen, IkonRestore } from "@/components/ui/ikon-aksi";
+import { Select, type SelectOption } from "@/components/ui/select";
 import { rupiah } from "@/lib/format";
 import { formatRupiah } from "@/lib/struk";
+import { kurirDariTag } from "@/lib/kurir";
 import { useSetelan } from "@/lib/setelan";
 import type { HasilUbah, UbahStrukInput } from "@/lib/supabase-tulis";
 import type { HasilPiutang } from "@/lib/piutang-tulis";
@@ -104,11 +106,13 @@ export function StrukDrawer({
   onHapusPermanen,
   onSimpan,
   onLunas,
+  onUbahTag,
   produk,
   onMintaProduk,
   produkDimuat = false,
   produkMemuat = false,
   sedangProses = false,
+  opsiTag = [],
 }: {
   sale: Sale | null;
   onClose: () => void;
@@ -125,6 +129,9 @@ export function StrukDrawer({
   /** Tandai struk ini lunas (cicil tepat sebanyak sisa). Kosong = tombol
    *  Tandai Lunas disembunyikan, sama seperti aksi lain yang butuh penulis. */
   onLunas?: (sale: Sale) => Promise<HasilPiutang>;
+  /** Ubah tag alamat customer. Kosong = tanpa aksi edit. Dipanggil hanya
+   *  kalau tag berubah. */
+  onUbahTag?: (namaCustomer: string, tag: string) => Promise<{ ok: boolean; pesan?: string }>;
   /** Katalog menu untuk "Tambah item". Kosong = katalognya belum dimuat. */
   produk?: Product[];
   /** Dipanggil saat kasir membuka pemilih menu. Katalog Penjualan dimuat
@@ -140,6 +147,8 @@ export function StrukDrawer({
   /** True selama request ke server berjalan — tombol dinonaktifkan supaya
    *  dua klik cepat tidak mengirim dua permintaan. */
   sedangProses?: boolean;
+  /** Daftar tag alamat yang dikenal, untuk dropdown Tag Alamat di mode edit. */
+  opsiTag?: string[];
 }) {
   const [mode, setMode] = useState<"lihat" | "edit" | "cetak">("lihat");
   const [tersimpan, setTersimpan] = useState(false);
@@ -162,6 +171,8 @@ export function StrukDrawer({
      tetap 48mm dan keluar terpotong. */
   const [setelan] = useSetelan();
   const [form, setForm] = useFormUbah();
+  const [ongkir, setOngkir] = useState<number>(0);
+  const [tagForm, setTagForm] = useState("");
   /* Pemilih menu untuk baris baru. Ditutup setiap kali drawer pindah struk,
      supaya daftar pilihan tidak menyambung dari struk sebelumnya. */
   const [pilihBuka, setPilihBuka] = useState(false);
@@ -172,6 +183,20 @@ export function StrukDrawer({
      "menu tidak ada". */
   const semuaOpsi = useMemo(() => opsiItemStruk(produk ?? []), [produk]);
   const { tampil: opsiTampil, total: opsiTotal } = cariOpsiItem(semuaOpsi, cariMenu);
+
+  /* Opsi dropdown Tag Alamat: "— Tanpa tag —" dulu, lalu nilai tagForm saat
+     ini (kalau tidak ada di opsiTag), lalu semua opsiTag yang dikenal. */
+  const opsiTagOptions = useMemo((): SelectOption[] => {
+    const hasil: SelectOption[] = [{ value: "", label: "— Tanpa tag —" }];
+    const dikenal = new Set(opsiTag);
+    if (tagForm.trim() && !dikenal.has(tagForm.trim())) {
+      hasil.push({ value: tagForm.trim(), label: tagForm.trim() });
+    }
+    for (const t of opsiTag) {
+      hasil.push({ value: t, label: t });
+    }
+    return hasil;
+  }, [opsiTag, tagForm]);
 
   /* Buka dengan isi struk yang dipilih. Dilakukan di sini supaya panel
      selalu mulai dari data yang benar, tidak dari sisa edit sebelumnya. */
@@ -187,12 +212,13 @@ export function StrukDrawer({
     setLunasPesan(null);
     setHilang([]);
     setForm(formDariStruk(sale));
+    setOngkir(sale.ongkir ?? 0);
+    setTagForm(sale.tag ?? "");
   }
 
   const subtotal = form.lines.reduce((a, l) => a + l.price * (Number(l.qty) || 0), 0);
-  const ongkir = sale?.ongkir ?? 0;
   const diskon = sale?.diskon ?? 0;
-  const totalBaru = Math.max(0, subtotal - diskon + ongkir);
+  const totalBaru = Math.max(0, subtotal + ongkir);
   const totalLama = sale?.total ?? 0;
 
   const ubahBaris = (i: number, patch: Partial<{ qty: number | ""; price: number; note: string }>) =>
@@ -311,6 +337,20 @@ export function StrukDrawer({
       /* antrean hapus kosong lagi — daftar yang tersimpan sudah sama dengan
          state di layar, dan menekan Simpan kedua tidak boleh mengulang DELETE. */
       setHilang([]);
+      /* Simpan tag ke master customer kalau berubah. Dipanggil setelah
+         onSimpan sukses supaya urutannya: struk dulu, baru customer. */
+      if (onUbahTag && tagForm !== (sale?.tag ?? "")) {
+        try {
+          const hasilTag = await onUbahTag(sale!.customer, tagForm);
+          if (!hasilTag.ok) {
+            setGalatSimpan(hasilTag.pesan ?? "Gagal menyimpan tag alamat.");
+            return;
+          }
+        } catch (e) {
+          setGalatSimpan(`Gagal menyimpan tag: ${(e as Error).message}`);
+          return;
+        }
+      }
       /* Total naik = `paid_amount` jadi lebih kecil dari total, jadi struk
          berbalik jadi "Belum Lunas". Diberi tahu di sini, bukan dibiarkan
          muncul sendiri di tabel tanpa penjelasan. */
@@ -618,7 +658,8 @@ export function StrukDrawer({
                     <dl className="space-y-1.5 rounded-2xl border border-border p-3 text-sm">
                       <Line label="Customer" value={sale.customer} />
                       <Line label="Alamat" value={sale.address ?? "—"} />
-                      <Line label="Kurir" value={sale.courier ?? "Ambil sendiri"} />
+                      <Line label="Tag Alamat" value={sale.tag?.trim() ? sale.tag : "—"} />
+                      <Line label="Kurir" value={sale.tag?.trim() ? (kurirDariTag(sale.tag) || "—") : "Ambil sendiri"} />
                     </dl>
                   </section>
                 </motion.div>
@@ -659,6 +700,24 @@ export function StrukDrawer({
                       data customer dan tidak dicetak di struk.
                     </span>
                   </label>
+
+                  {onUbahTag && (
+                    <div className="block">
+                      <span className="mb-1.5 block text-[11px] font-bold uppercase tracking-wider text-muted-foreground">
+                        Tag Alamat
+                      </span>
+                      <Select
+                        ariaLabel="Tag alamat"
+                        value={tagForm}
+                        onChange={setTagForm}
+                        options={opsiTagOptions}
+                      />
+                      <span className="mt-1 block text-xs text-muted-foreground">
+                        Area/franchise customer. Perubahan disimpan langsung ke
+                        master customer, bukan ke struk ini saja.
+                      </span>
+                    </div>
+                  )}
 
                   {/* Item bisa salah ketik: qty kelewat atau harga keliru
                       saat input. Membatalkan struk seluruhnya hanya untuk
@@ -874,6 +933,20 @@ export function StrukDrawer({
                     </div>
                   </div>
 
+                  {/* Ongkir bisa diedit di sini: hasilnya ikut dihitung ulang
+                      ke total dan tercetak di struk saat Cetak Ulang. */}
+                  <label className="block">
+                    <span className="mb-0.5 block text-[10px] font-bold uppercase tracking-wider text-muted-foreground">
+                      Ongkir
+                    </span>
+                    <InputRupiah
+                      aria-label="Ongkir"
+                      value={ongkir}
+                      onChange={(n) => setOngkir(n)}
+                      className="h-9 px-2"
+                    />
+                  </label>
+
                   {totalBaru !== totalLama && (
                     <p className="rounded-2xl bg-[#F3DBA2] px-3.5 py-2.5 text-xs font-medium text-[#6B4A0A] dark:bg-[#3A2A10] dark:text-[#F0C987]">
                       Total berubah {formatRupiah(totalLama)} → {formatRupiah(totalBaru)}.
@@ -893,8 +966,8 @@ export function StrukDrawer({
                     </p>
                   )}
                   <p className="rounded-2xl bg-muted px-3.5 py-2.5 text-xs text-muted-foreground">
-                    Item ber&nbsp;qty 0 otomatis dibuang saat disimpan. Ongkir dan diskon
-                    tidak ikut dihitung ulang — ubah dari menu Penjualan.
+                    Item ber&nbsp;qty 0 otomatis dibuang saat disimpan. Diskon
+                    tidak bisa diedit dari sini — ubah dari menu Penjualan.
                   </p>
                   {/* role="alert": tanpa itu, kegagalan simpan hanya terlihat
                       karena mode tidak berubah, dan itu alasan yang sama
@@ -928,14 +1001,15 @@ export function StrukDrawer({
                       payment: sale.payment,
                       customerName: form.customer,
                       chatDate: sale.completedAt,
-                      queueNo: null,
+                      queueNo: sale.queueNo ?? null,
+                      kurir: kurirDariTag(tagForm),
                       /* Dari form, bukan string kosong — begitu pula `note`
                          per item di bawah. Keduanya dulu di-hardcode/dibuang,
                          jadi Cetak Ulang mencetak struk yang isinya berbeda
                          dari struk yang aslinya sudah keluar dari printer. */
                       sendNote: form.sendNote,
                       subtotal,
-                      shipping: sale.ongkir ?? 0,
+                      shipping: ongkir,
                       /* Total ikut mengikuti form: kalau qty/harga diedit, yang
                          dicetak harus angkanya yang baru, bukan total lama. */
                       total: totalBaru,

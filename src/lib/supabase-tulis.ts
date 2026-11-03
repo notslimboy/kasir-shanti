@@ -187,7 +187,10 @@ export async function ubahStruk(input: UbahStrukInput): Promise<HasilUbah> {
 
   const ditulis = [...disimpan, ...baru];
   const subtotal = ditulis.reduce((a, l) => a + Math.max(0, n(l.price)) * Math.max(0, n(l.qty)), 0);
-  const total = Math.max(0, subtotal - Math.max(0, n(input.diskon)) + Math.max(0, n(input.ongkir)));
+  /* Ongkir disimpan di kolom sales.discount (warisan app lama). Total =
+     subtotal + ongkir; `input.diskon` tidak ikut dihitung karena kolom
+     itu sudah dipakai untuk ongkir. */
+  const total = Math.max(0, subtotal + Math.max(0, n(input.ongkir)));
 
   /* Cek dulu total lama, supaya `statusBerubah` bisa dilaporkan dan PATCH
      tidak diam-diam menimpa `paid_amount`. */
@@ -215,6 +218,7 @@ export async function ubahStruk(input: UbahStrukInput): Promise<HasilUbah> {
       customer_name: String(input.customer || "").trim(),
       send_note: rapikanCatatan(String(input.sendNote ?? "")) ?? "",
       subtotal,
+      discount: Math.max(0, n(input.ongkir)),
       total,
     });
     if (!hasilHeader.ok) return { ok: false, pesan: hasilHeader.pesan };
@@ -423,6 +427,112 @@ export async function ubahCustomer(input: UbahCustomerInput): Promise<HasilTulis
     return gabungPesan(jelaskanGalatTulis(404, null, nama));
   }
   return { ok: true };
+}
+
+/* -------------------------------------------------------------------------
+   Tag alamat — simpan tag ke master customer.
+
+   Berbeda dari `ubahCustomer`: ini tidak butuh id customer. Mencari
+   berdasarkan nama (case-insensitive, trim), lalu PATCH tag-nya. Kalau
+   nama tidak ditemukan, langsung POST customer baru dengan tag.
+
+   Dipanggil dari drawer Penjualan saat kasir mengganti tag lewat dropdown
+   Tag Alamat — nama yang tidak ada di master berarti pelanggan baru.
+   ------------------------------------------------------------------------- */
+
+export async function tagCustomer(nama: string, tag: string): Promise<HasilTulis> {
+  const namaBersih = String(nama ?? "").trim();
+  if (!namaBersih) {
+    return gabungPesan(galatValidasi("Nama customer tidak boleh kosong."));
+  }
+  const tagAkhir = tag && String(tag).trim() ? String(tag).trim() : null;
+
+  try {
+    /* Cari customer by name. Tarik semua (hanya id,name,tag) lalu cocokkan
+       case-insensitive + trim — Supabase eq bersifat case-sensitive. */
+    const cari = await fetch(`${SUPABASE_URL}/rest/v1/customers?select=id,name,tag`, {
+      headers: headerRest(),
+    });
+    if (!cari.ok) return gabungPesan(await jelaskan(cari, namaBersih));
+
+    const daftar = (await cari.json()) as { id: number; name: string; tag: string | null }[];
+    const lower = namaBersih.toLowerCase();
+    const ada = daftar.find((c) => c.name.trim().toLowerCase() === lower);
+
+    if (ada) {
+      /* PATCH tag — hanya tag, tidak menyentuh kolom lain. */
+      return await patchSatuCustomer(ada.id, tagAkhir);
+    }
+
+    /* POST customer baru. */
+    return await buatSatuCustomer(namaBersih, tagAkhir);
+  } catch (e) {
+    const offline: GalatTulis = {
+      judul: "Tidak ada koneksi ke server",
+      penjelasan: "Perangkat ini tidak bisa menghubungi server. Data lu belum tersimpan.",
+      langkah: "Cek internet, lalu tekan Simpan lagi.",
+      teknis: String(e),
+    };
+    return gabungPesan(offline);
+  }
+}
+
+/** PATCH tag satu customer. Body hanya berisi tag + updated_at. */
+async function patchSatuCustomer(id: number, tag: string | null): Promise<HasilTulis> {
+  const r = await fetch(`${SUPABASE_URL}/rest/v1/customers?id=eq.${id}`, {
+    method: "PATCH",
+    headers: {
+      ...headerRest(),
+      "Content-Type": "application/json",
+      Prefer: "return=representation",
+    },
+    body: JSON.stringify({ tag, updated_at: new Date().toISOString() }),
+  });
+  if (!r.ok) return gabungPesan(await jelaskan(r, String(id)));
+  const data = (await r.json()) as unknown[];
+  if (!Array.isArray(data) || data.length === 0) {
+    return gabungPesan(jelaskanGalatTulis(404, null, String(id)));
+  }
+  return { ok: true };
+}
+
+/** POST customer baru dengan tag. Kalau 409 (nama sudah dipakai oleh request
+ *  yang tiba lebih dulu), cari ulang lalu PATCH tag-nya. */
+async function buatSatuCustomer(nama: string, tag: string | null): Promise<HasilTulis> {
+  const url = `${SUPABASE_URL}/rest/v1/customers`;
+  const r = await fetch(url, {
+    method: "POST",
+    headers: {
+      ...headerRest(),
+      "Content-Type": "application/json",
+      Prefer: "return=representation",
+    },
+    body: JSON.stringify({
+      name: nama,
+      tag,
+      deposit_balance: 0,
+      default_shipping: 0,
+      last_order_at: "",
+    }),
+  });
+  if (r.ok) return { ok: true };
+
+  /* 409 = nama sudah dipakai oleh request yang tiba duluan. Cari ulang
+     lalu PATCH, jangan gagal. */
+  if (r.status === 409) {
+    const ulang = await fetch(`${SUPABASE_URL}/rest/v1/customers?select=id,name,tag`, {
+      headers: headerRest(),
+    });
+    if (!ulang.ok) return gabungPesan(await jelaskan(ulang, nama));
+    const daftar = (await ulang.json()) as { id: number; name: string; tag: string | null }[];
+    const lower = nama.toLowerCase();
+    const ada = daftar.find((c) => c.name.trim().toLowerCase() === lower);
+    if (ada) return await patchSatuCustomer(ada.id, tag);
+    /* Tidak ketemu — laporkan error asli. */
+    return gabungPesan(await jelaskan(r, nama));
+  }
+
+  return gabungPesan(await jelaskan(r, nama));
 }
 
 /** Bentuk hasil dari `jelaskanGalatTulis`: `pesan` dibuat dari bagian-bagian
