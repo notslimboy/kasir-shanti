@@ -463,6 +463,12 @@ export function ImporPesananPage() {
         mulaiNo,
         onProgress: (selesai, total) =>
           setToast({ tone: "info", spin: true, text: `Menyimpan struk ${selesai} dari ${total}…` }),
+        customerInfo: data.customers.map((c) => ({
+          id: Number(c.id.replace(/^c/, "")),
+          name: c.name,
+          deposit: c.deposit,
+        })),
+        customerAlias: data.customerAlias,
       });
       /* Buang cache & tarik ulang. `perbaruiSetelahTulis` (bukan muatUlang)
          tidak menarik ulang 1.095 produk, jadi katalog "Pilih Barang"

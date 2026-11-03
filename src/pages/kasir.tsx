@@ -13,6 +13,7 @@ import { useSetelan } from "@/lib/setelan";
 import { InputCustomer } from "@/components/ui/input-customer";
 import { CatatanInput } from "@/components/ui/catatan-input";
 import { saranCustomer } from "@/lib/cocok-customer";
+import { saldoDepositUntuk } from "@/lib/deposit-customer";
 import { triggerSyncFromSheet } from "@/lib/sync-google-sheet";
 import { rapikanCatatan, ringkasCatatan } from "@/lib/catatan-item";
 import { cssStruk, strukHtml, type DataStruk } from "@/lib/struk";
@@ -387,10 +388,9 @@ export function KasirPage() {
   const subtotal = cart.reduce((a, i) => a + i.price * i.qty, 0);
   const total = Math.max(0, subtotal - diskon + ongkir);
   const saldoCustomer = (() => {
-    const nama = customer.trim().toLowerCase();
+    const nama = customer.trim();
     if (!nama) return 0;
-    const cocok = live.customers.find((c) => c.name.trim().toLowerCase() === nama);
-    return cocok?.deposit ?? 0;
+    return saldoDepositUntuk(nama, live.customers, live.customerAlias);
   })();
   const dipakai = Math.max(0, Math.min(saldoCustomer, total));
   const totalBayar = total - dipakai;

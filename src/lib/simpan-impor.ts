@@ -1,6 +1,7 @@
 import { headerRest, SUPABASE_URL } from "@/supabase/client";
 import type { PesananImpor } from "./impor-pesanan";
 import type { SaleItemRow, SaleRow } from "@/supabase/types";
+import { kunciNama, catatMutasiDeposit } from "./customer-deposit";
 
 /* ==========================================================================
    Menyimpan hasil import ke Supabase.
@@ -38,6 +39,18 @@ export type HasilSimpanPesanan = {
   struk: { receiptNo: string; queueNo: number; pesanan: PesananImpor }[];
   /** Tanggal proses yang dipakai semua struk pada batch ini (YYYY-MM-DD). */
   tanggalProses: string;
+};
+
+/**
+ * Data customer & alias untuk deposit otomatis saat import.
+ */
+export type InfoCustomerDeposit = {
+  /** Id numerik dari tabel `customers`. */
+  id: number;
+  /** Nama kanonik di `customers.name`. */
+  name: string;
+  /** Saldo deposit saat import dimulai. */
+  deposit: number;
 };
 
 async function nomorStrukBerikutnya(tanggal: string): Promise<number> {
@@ -99,6 +112,51 @@ function tanggalProses(): string {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
 }
 
+/**
+ * Cari InfoCustomerDeposit dari daftar dengan pencocokan nama berurutan.
+ * Sama dengan logika `saldoDepositUntuk` di deposit-customer.ts tapi
+ * mengembalikan seluruh info, bukan hanya saldo.
+ */
+function cariInfoDeposit(
+  nama: string,
+  info: InfoCustomerDeposit[],
+  alias: readonly { customer_id: number; alias: string }[],
+): InfoCustomerDeposit | null {
+  const cari = kunciNama(nama);
+  if (!cari) return null;
+
+  /* (1) nama persis */
+  const persis = info.find((c) => kunciNama(c.name) === cari);
+  if (persis) return persis;
+
+  /* (2) alias persis */
+  for (const a of alias) {
+    if (kunciNama(a.alias) === cari) {
+      const c = info.find((x) => a.customer_id === x.id);
+      if (c) return c;
+    }
+  }
+
+  /* (3) nama yang memuat */
+  const urutNama = [...info].sort((a, b) => b.name.length - a.name.length);
+  for (const c of urutNama) {
+    const cKunci = kunciNama(c.name);
+    if (cKunci && cari.includes(cKunci)) return c;
+  }
+
+  /* (4) alias yang memuat */
+  const urutAlias = [...alias].sort((a, b) => b.alias.length - a.alias.length);
+  for (const a of urutAlias) {
+    const aKunci = kunciNama(a.alias);
+    if (aKunci && cari.includes(aKunci)) {
+      const c = info.find((x) => a.customer_id === x.id);
+      if (c) return c;
+    }
+  }
+
+  return null;
+}
+
 export async function simpanPesananImpor(
   daftar: PesananImpor[],
   options: {
@@ -106,6 +164,11 @@ export async function simpanPesananImpor(
     mulaiNo?: number;
     /** Dipanggil tiap struk selesai diproses, untuk status di layar. */
     onProgress?: (selesai: number, total: number) => void;
+    /** Data customer untuk deposit otomatis. Kalau diisi, deposit dipakai
+     *  untuk mengurangi total struk (min(saldo, total)). */
+    customerInfo?: InfoCustomerDeposit[];
+    /** Alias untuk mencocokkan nama struk ke customer. */
+    customerAlias?: readonly { customer_id: number; alias: string }[];
   } = {},
 ): Promise<HasilSimpanPesanan> {
   const pesan: string[] = [];
@@ -147,6 +210,18 @@ export async function simpanPesananImpor(
 
   const struk: { receiptNo: string; queueNo: number; pesanan: PesananImpor }[] = [];
 
+  /* Saldo deposit berjalan per customer (id → sisa). */
+  const saldoBerjalan = new Map<number, number>();
+  if (options.customerInfo) {
+    for (const c of options.customerInfo) {
+      saldoBerjalan.set(c.id, c.deposit);
+    }
+  }
+  /* Customer yang depositnya benar-benar terpakai (untuk PATCH sekali saja). */
+  const customerTerpakai = new Map<number, number>(); // id → total dipakai
+  /* Catatan ledger per struk yang sudah terpakai. */
+  const catatanLedger: { customerId: number; saleId: number; amount: number; receiptNo: string }[] = [];
+
   for (const p of daftar) {
     if (!p.tanggal || p.items.length === 0) {
       gagal++;
@@ -159,6 +234,18 @@ export async function simpanPesananImpor(
     const no = urut++;
     const receiptNo = `SH-${tanggal.replace(/-/g, "")}-${String(no).padStart(4, "0")}`;
     const queueNo = ++antrean;
+
+    /* Hitung deposit yang bisa dipakai untuk struk ini */
+    let depositPakai = 0;
+    let customerId = 0;
+    if (options.customerInfo && options.customerAlias) {
+      const info = cariInfoDeposit(p.customer, options.customerInfo, options.customerAlias);
+      if (info) {
+        customerId = info.id;
+        const sisa = saldoBerjalan.get(info.id) ?? 0;
+        depositPakai = Math.max(0, Math.min(sisa, p.total));
+      }
+    }
 
     const sale: Omit<SaleRow, "id"> = {
       receipt_no: receiptNo,
@@ -182,12 +269,8 @@ export async function simpanPesananImpor(
       chat_date: p.tanggal,
       deleted_at: null,
       stock_restored_on_delete: 0,
-      /* Sama seperti Kasir: struk hasil impor lahir BELUM LUNAS, dan
-         pelunasannya dicatat di halaman Piutang. Lihat catatan panjang di
-         `simpan-penjualan.ts` — dua jalur tulis ini harus sepakat, kalau
-         tidak, status awal struk bergantung pada dari mana ia dibuat. */
-      paid_amount: 0,
-      deposit_used: 0,
+      paid_amount: depositPakai,
+      deposit_used: depositPakai,
       created_at: prosesIso,
       queue_no: queueNo,
       queue_date: tanggal,
@@ -236,6 +319,14 @@ export async function simpanPesananImpor(
       continue;
     }
 
+    /* Catat deposit terpakai */
+    if (depositPakai > 0 && customerId > 0) {
+      const sisaSekarang = saldoBerjalan.get(customerId) ?? 0;
+      saldoBerjalan.set(customerId, sisaSekarang - depositPakai);
+      customerTerpakai.set(customerId, (customerTerpakai.get(customerId) ?? 0) + depositPakai);
+      catatanLedger.push({ customerId, saleId: id, amount: -depositPakai, receiptNo });
+    }
+
     tersimpan++;
     /* queueNo ikut dikembalikan: yang dicetak setelah simpan harus memakai
        nomor yang BENAR-BENAR tersimpan di server, bukan perkiraan
@@ -245,6 +336,35 @@ export async function simpanPesananImpor(
     struk.push({ receiptNo, queueNo, pesanan: p });
     selesai++;
     options.onProgress?.(selesai, total);
+  }
+
+  /* PATCH deposit_balance untuk customer yang terpakai */
+  const patchHeaders = { ...headerRest(), "Content-Type": "application/json", Prefer: "return=minimal" };
+  for (const [custId, totalPakai] of customerTerpakai) {
+    try {
+      const saldoAwal = options.customerInfo?.find((c) => c.id === custId)?.deposit ?? 0;
+      const saldoBaru = Math.max(0, saldoAwal - totalPakai);
+      const patch = await fetch(`${SUPABASE_URL}/rest/v1/customers?id=eq.${custId}`, {
+        method: "PATCH",
+        headers: patchHeaders,
+        body: JSON.stringify({ deposit_balance: saldoBaru, updated_at: new Date().toISOString() }),
+      });
+      if (!patch.ok) {
+        pesan.push(`Peringatan: gagal mengupdate deposit customer #${custId} (${patch.status}).`);
+      }
+    } catch {
+      pesan.push(`Peringatan: gagal mengupdate deposit customer #${custId}.`);
+    }
+  }
+
+  /* Catat deposit_ledger per struk (gagal tidak menggagalkan import) */
+  for (const catat of catatanLedger) {
+    await catatMutasiDeposit({
+      customerId: catat.customerId,
+      saleId: catat.saleId,
+      amount: catat.amount,
+      note: `Dipakai di struk ${catat.receiptNo} (import)`,
+    });
   }
 
   return { tersimpan, gagal, pesan, struk, tanggalProses: tanggal };

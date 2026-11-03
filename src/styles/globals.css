@@ -206,6 +206,7 @@
     font-family: var(--font-sans);
     font-feature-settings: "tnum" 1;
     -webkit-font-smoothing: antialiased;
+    -webkit-text-size-adjust: 100%;
   }
 
   /* semua angka rupiah rata kolom, font yang sama */
@@ -257,5 +258,17 @@
     background-clip: content-box;
     border-radius: 999px;
     opacity: 0.35;
+  }
+}
+
+/* iOS Safari zooms the page when a text-entry control uses type smaller than
+   16px. Keep compact desktop typography, but use a readable 16px on phones
+   and tablets. This unlayered rule intentionally wins over page-level text-xs
+   utilities without changing control height, padding, or manual page zoom. */
+@media (max-width: 1023px), (hover: none) and (pointer: coarse) {
+  input:not([type="checkbox"]):not([type="radio"]):not([type="file"]):not([type="range"]),
+  select,
+  textarea {
+    font-size: 16px;
   }
 }

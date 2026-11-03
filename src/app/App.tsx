@@ -12,7 +12,6 @@ import { ItsfoodProdukPage } from "@/pages/itsfood-produk";
 import { DataProvider, useData } from "@/lib/data-source";
 import { AuthProvider, useAuth } from "@/lib/auth";
 import { triggerSyncFromSheet } from "@/lib/sync-google-sheet";
-import { IconButton } from "@/components/ui/card";
 import { LayarMemuatMasuk, MasukPage } from "@/pages/masuk";
 import { Beranda } from "@/pages/beranda";
 import { KasirPage } from "@/pages/kasir";
@@ -23,7 +22,7 @@ import { PengaturanPage } from "@/pages/pengaturan";
 import { MenuPage } from "@/pages/menu";
 
 /* ==========================================================================
-   App shell — sidebar + topbar + routing.
+   App shell — sidebar + routing.
    Tema diputuskan sebelum hydration (lihat index.html) supaya tidak ada flash.
    ========================================================================== */
 
@@ -33,10 +32,7 @@ const ico = (d: string) => (
     <path d={d} />
   </svg>
 );
-const IcoSun = ico("M12 4V2M12 22v-2M4 12H2M22 12h-2M5.6 5.6 4.2 4.2M19.8 19.8l-1.4-1.4M5.6 18.4l-1.4 1.4M19.8 4.2l-1.4 1.4M16 12a4 4 0 1 1-8 0 4 4 0 0 1 8 0Z");
-const IcoMoon = ico("M20 14.5A8.5 8.5 0 0 1 9.5 4a8.5 8.5 0 1 0 10.5 10.5Z");
 const IcoMenu = ico("M4 7h16M4 12h16M4 17h16");
-const IcoKeluar = ico("M15 17l5-5-5-5M20 12H9M12 20H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h6");
 
 /* sidebar id <-> route */
 const NAV_TO_ROUTE: Record<string, string> = {
@@ -82,70 +78,6 @@ function GerbangMasuk() {
   );
 }
 
-/** Lencana status data: kasir harus bisa tahu layar sedang menampilkan
-    angka Supabase atau angka contoh. Diam-diam memakai data contoh adalah
-    cara tercepat membuat orang percaya angka yang salah. */
-function DataBadge() {
-  const { status, error, diambilPada, muatUlang } = useData();
-  if (status === "memuat") {
-    return (
-      <span className="hidden h-10 items-center gap-1.5 rounded-full border border-input px-3 text-xs font-semibold text-muted-foreground md:inline-flex">
-        <motion.span
-          animate={{ rotate: 360 }}
-          transition={{ repeat: Infinity, duration: 1, ease: "linear" }}
-          className="inline-block h-3 w-3 rounded-full border-2 border-current border-t-transparent"
-        />
-        Mengambil data
-      </span>
-    );
-  }
-  if (status === "gagal") {
-    return (
-      <button
-        onClick={() => void muatUlang()}
-        title={error ?? "Supabase tidak terbaca — ketuk untuk coba lagi"}
-        className="inline-flex h-10 items-center gap-1.5 rounded-full bg-[#F3DBA2] px-3 text-xs font-bold text-[#6B4A0A] dark:bg-[#3A2A10] dark:text-[#F0C987]"
-      >
-        Data gagal dimuat · coba lagi
-      </button>
-    );
-  }
-  return (
-    <span
-      title={diambilPada ? `Terakhir diambil ${diambilPada.toLocaleTimeString("id-ID")}` : undefined}
-      className="hidden h-10 items-center gap-1.5 rounded-full border border-input px-3 text-xs font-semibold text-muted-foreground md:inline-flex"
-    >
-      <span className="h-2 w-2 rounded-full bg-success" />
-      Live
-    </span>
-  );
-}
-
-/** Sign out.
- *
- *  Present as an icon rather than a menu, because on a shared kiosk the next
- *  person must be able to lock the screen without hunting for it. Hidden on
- *  the narrowest phones where the topbar has no room and the session is
- *  short-lived anyway. */
-function KeluarButton() {
-  const { keluar } = useAuth();
-  const [bekerja, setBekerja] = useState(false);
-  if (bekerja) return null;
-  return (
-    <button
-      aria-label="Keluar"
-      title="Keluar"
-      onClick={() => {
-        setBekerja(true);
-        void keluar();
-      }}
-      className="hidden h-10 w-10 shrink-0 place-items-center rounded-full border border-border bg-card text-foreground transition-colors hover:border-ring sm:grid"
-    >
-      {IcoKeluar}
-    </button>
-  );
-}
-
 /** Halaman yang hanya boleh dibuka di desktop (lg ke atas).
     Di bawah itu, user dipaksa balik ke Dashboard. */
 function DesktopOnly({ children }: { children: ReactNode }) {
@@ -168,6 +100,7 @@ function DesktopOnly({ children }: { children: ReactNode }) {
 function AppShell() {
   const [dark, setDark] = useState(() => document.documentElement.classList.contains("dark"));
   const [drawer, setDrawer] = useState(false);
+  const { status, muatUlang } = useData();
   const loc = useLocation();
   const nav = useNavigate();
 
@@ -203,91 +136,55 @@ function AppShell() {
   };
 
   return (
-    <div className="flex min-h-dvh flex-col bg-background text-foreground">
-      <header className="sticky top-0 z-30 flex h-16 shrink-0 items-center gap-3 border-b border-border bg-background/90 px-4 backdrop-blur lg:px-7">
+    <div className="flex min-h-dvh bg-background text-foreground">
+      <header className="lg:hidden fixed top-0 z-30 flex h-11 w-full items-center border-b border-border bg-background/95 px-2 backdrop-blur">
         <button
-          aria-label="Buka menu" onClick={() => setDrawer(true)}
-          /* `shrink-0` bukan hiasan: tanpa itu flex menggencet tombol ini jadi
-             elips saat barisnya sesak (brand + tombol kanan tidak boleh
-             mengecil), dan lingkarannya terlihat gepeng. */
-          className="grid h-10 w-10 shrink-0 place-items-center rounded-full border border-border bg-card text-foreground lg:hidden"
+          aria-label="Buka menu"
+          onClick={() => setDrawer(true)}
+          className="grid h-10 w-10 shrink-0 place-items-center rounded-full border border-border bg-card text-foreground"
         >
           {IcoMenu}
         </button>
-
-        <button
-          onClick={() => go("dashboard")}
-          /* Nama brand hanya di desktop. Di mobile tempatnya sudah dipakai
-             tombol kanan, dan brand sudah diwakili logo di dalam drawer. */
-          className="hidden shrink-0 rounded-2xl px-2 py-1.5 hover:bg-muted lg:block"
-        >
-          <span className="whitespace-nowrap text-base font-bold tracking-[-0.02em] lg:text-lg">
-            Shanti Catering
-          </span>
-        </button>
-
-        <div className="ml-auto flex shrink-0 items-center gap-2">
-          <DataBadge />
-          <IconButton label={dark ? "Mode terang" : "Mode gelap"} onClick={() => setDark((d) => !d)}>
-            {dark ? IcoSun : IcoMoon}
-          </IconButton>
-          <KeluarButton />
-          <button
-            onClick={() => go("kasir")}
-            className="flex h-10 items-center gap-2 whitespace-nowrap rounded-full bg-primary px-3.5 font-semibold text-primary-foreground sm:px-4"
-          >
-            Transaksi Baru
-          </button>
-        </div>
       </header>
 
-      <div className="flex min-h-[calc(100dvh-4rem)] flex-1">
-        {/* Wrapper sidebar (desktop).
+      {/* Desktop rail stays pinned to the viewport; navigation scrolls inside it. */}
+      <div className="hidden shrink-0 lg:sticky lg:top-0 lg:flex lg:h-dvh">
+        <Sidebar active={activeNav} onSelect={go} dark={dark} setDark={setDark} />
+      </div>
 
-            Wrapper ini, bukan `<Sidebar>` itu sendiri, yang memegang
-            sticky + centering. Alasannya tinggi wrapper harus berasal
-            dari VIEWPORT, bukan dari isi halaman.
-
-            Kalau centering ditaruh di nav (`sticky top-1/2
-            -translate-y-1/2`), rail hanya bisa bergerak di dalam
-            wrapper. Selama wrapper ikut tinggi halaman, ruinnya
-            muncul: begitu halaman digulir atau input difokus (browser
-            melakukan scroll-into-view, yang terjadi juga saat mengetik
-            di kolom pencarian), wrapper tidak punya ruang untuk menahan
-            rail di tengah dan rail ikut naik — persis bug yang dilapor.
-
-            Di sini tinggi wrapper = tinggi viewport (`100dvh-4rem`,
-            dikurangi tinggi header `h-16`), jadi:
-            - `sticky top-16` → wrapper tetap menempel tepat di bawah
-              header, tidak pernah ikut ter-scroll.
-            - `justify-center` → rail selalu di tengah vertikal area
-              itu, relatif terhadap viewport, stabil terhadap scroll
-              maupun fokus input.
-            - Tinggi tetap dari viewport sehingga rail tidak pernah
-              bisa terdorong keluar area sticky. */}
-        <div className="hidden shrink-0 lg:sticky lg:top-16 lg:flex lg:h-[calc(100dvh-4rem)] lg:flex-col lg:justify-center">
-          <Sidebar active={activeNav} onSelect={go} />
-        </div>
-
-      {drawer && (
-        <div className="fixed inset-0 z-50 lg:hidden">
-          <button aria-label="Tutup menu" className="absolute inset-0 bg-black/40" onClick={() => setDrawer(false)} />
-          <motion.div
-            initial={{ x: -100 }} animate={{ x: 0 }}
-            transition={{ type: "spring", stiffness: 320, damping: 32 }}
-            className="absolute inset-y-0 left-0"
-          >
-            {/* Drawer tidak lewat wrapper sticky desktop, jadi rail
-                di sini hanya butuh tinggi penuh layar. Sticky dan
-                centering sudah menjadi tanggung jawab wrapper
-                desktop di atas. */}
-            <Sidebar active={activeNav} onSelect={go} className="!h-dvh" />
-          </motion.div>
-        </div>
-      )}
+      <AnimatePresence mode="wait">
+        {drawer && (
+          <div className="fixed inset-0 z-50 lg:hidden">
+            <button aria-label="Tutup menu" className="absolute inset-0 bg-black/40" onClick={() => setDrawer(false)} />
+            <motion.div
+              initial={{ x: -260 }}
+              animate={{ x: 0 }}
+              exit={{ x: -260 }}
+              transition={{ type: "spring", stiffness: 320, damping: 32 }}
+              className="absolute inset-y-0 left-0"
+            >
+              <Sidebar active={activeNav} onSelect={go} dark={dark} setDark={setDark} forceExpanded hideToggle className="!h-dvh" />
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
 
       <div className="min-w-0 flex-1">
-        <main className="px-4 py-5 lg:px-7 lg:py-6">
+        <main className="flex-1 px-4 pt-12 pb-5 lg:px-7 lg:py-6">
+          {status === "memuat" && (
+            <div role="status" className="mb-4 rounded-xl border border-border bg-card/80 px-4 py-2.5 text-xs font-medium text-muted-foreground">
+              Menghubungkan ke server...
+            </div>
+          )}
+          {status === "gagal" && (
+            <button
+              type="button"
+              onClick={() => void muatUlang()}
+              className="mb-4 w-full rounded-xl border border-destructive/30 bg-destructive/10 px-4 py-2.5 text-left text-xs font-semibold text-destructive transition-colors hover:bg-destructive/15 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-destructive/60"
+            >
+              Koneksi terputus · ketuk untuk muat ulang
+            </button>
+          )}
           <AnimatePresence mode="wait">
             {/* Boundary memakai key route: pindah halaman melepas error
                 halaman sebelumnya, jadi user tidak terjebak di layar gagal. */}
@@ -324,7 +221,6 @@ function AppShell() {
           </AnimatePresence>
 
         </main>
-      </div>
       </div>
     </div>
   );

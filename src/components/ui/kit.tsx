@@ -122,7 +122,7 @@ export function Field({ label, hint, children }: { label: string; hint?: string;
 }
 
 export const inputClass =
-  "h-11 w-full rounded-xl border border-input bg-card px-3.5 text-sm outline-none transition-colors focus:border-ring focus:ring-2 focus:ring-ring/25";
+  "h-11 w-full rounded-xl border border-input bg-card px-3.5 text-base lg:text-sm outline-none transition-colors focus:border-ring focus:ring-2 focus:ring-ring/25";
 
 export const btnPrimary =
   "inline-flex h-11 items-center justify-center gap-2 rounded-full bg-primary px-5 font-semibold text-primary-foreground transition-opacity hover:opacity-90";

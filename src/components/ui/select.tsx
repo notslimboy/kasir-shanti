@@ -280,7 +280,7 @@ export function Select({
                     setActive(0);
                   }}
                   placeholder={searchPlaceholder}
-                  className="h-9 w-full rounded-lg bg-muted px-3 text-sm outline-none placeholder:text-muted-foreground"
+                  className="h-9 w-full rounded-lg bg-muted px-3 text-base lg:text-sm outline-none placeholder:text-muted-foreground"
                 />
               </div>
             )}

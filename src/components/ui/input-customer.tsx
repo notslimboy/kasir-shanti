@@ -113,7 +113,7 @@ export function InputCustomer({
           }
         }}
         className={cn(
-          "h-10 w-full rounded-xl border bg-card px-3 text-sm outline-none transition-colors",
+          "h-10 w-full rounded-xl border bg-card px-3 text-base lg:text-sm outline-none transition-colors",
           tampil ? "border-ring ring-2 ring-ring/25" : "border-input hover:border-ring",
         )}
       />

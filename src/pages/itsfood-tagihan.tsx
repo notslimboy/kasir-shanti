@@ -639,7 +639,7 @@ function DaftarBills({ list, resetKey }: { list: ItsfoodBill[]; resetKey: string
         <>
           {/* Tabel penuh (sm ke atas) — konvensi tabel DESIGN.md, di
               dalam wadah tint supaya barisnya tidak nyatu dengan Card. */}
-          <div className="rounded-2xl bg-background px-4 py-1.5">
+          <div className="sm:rounded-2xl sm:bg-background sm:px-4 sm:py-1.5">
           <table className="hidden w-full sm:table">
             <thead>
               <tr className="border-b border-border text-[11px] uppercase tracking-[0.06em] text-muted-foreground">

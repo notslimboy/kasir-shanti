@@ -101,7 +101,7 @@ export function InputRupiah({ value, onChange, prefix = "", className = "", ...r
           onChange(angka);
         }}
         className={
-          "w-full rounded-xl border border-input bg-card text-right text-sm figure outline-none focus:border-ring " +
+          "w-full rounded-xl border border-input bg-card text-right text-base lg:text-sm figure outline-none focus:border-ring " +
           (prefix ? "pl-8 " : "") +
           className
         }

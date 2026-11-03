@@ -94,7 +94,7 @@ export function Combobox({
           }
         }}
         className={cn(
-          "h-11 w-full rounded-xl border bg-card px-3.5 text-sm outline-none transition-colors",
+          "h-11 w-full rounded-xl border bg-card px-3.5 text-base lg:text-sm outline-none transition-colors",
           open ? "border-ring ring-2 ring-ring/25" : "border-input hover:border-ring",
         )}
       />
