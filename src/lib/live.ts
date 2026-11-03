@@ -102,7 +102,7 @@ export async function ambilStruk(dari?: string, sampai?: string): Promise<{
   const kolom =
     "id,receipt_no,completed_at,store_name,payment,subtotal,discount,tax,total," +
     "customer_name,customer_address,order_note,due_text,chat_date,deleted_at," +
-    "stock_restored_on_delete,paid_amount,created_at,queue_no,queue_date,send_note";
+    "stock_restored_on_delete,paid_amount,deposit_used,created_at,queue_no,queue_date,send_note";
 
   /* Paginasi wajib: PostgREST memotong 1.000 baris, dan satu bulan busiest
      bisa melampauinya — tanpa ini, KOT dan total omzet diam-diam kehilangan

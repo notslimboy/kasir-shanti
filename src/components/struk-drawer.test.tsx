@@ -8,6 +8,7 @@ import userEvent from "@testing-library/user-event";
 import type { Sale } from "@/lib/sale";
 import type { Product } from "@/lib/menu-seed";
 import type { HasilUbah, UbahStrukInput } from "@/lib/supabase-tulis";
+import type { HasilPiutang } from "@/lib/piutang-tulis";
 
 /* "Cetak Ulang" and "Ubah Data" in the receipt drawer.
  *
@@ -720,5 +721,230 @@ describe("Tag Alamat di drawer struk", () => {
 
     const data = JSON.parse((await screen.findByTestId("struk-data")).textContent ?? "{}");
     expect(data.kurir).toBe("Yanto");
+  });
+});
+
+/* -------------------------------------------------------------------------
+   Deposit Terpakai & Pembayaran dengan Uang Diterima
+   -------------------------------------------------------------------------- */
+
+const lunasDiterimaMock = vi.fn<(s: Sale, u: number, k: boolean) => Promise<HasilPiutang>>();
+
+const SALE_DEPOSIT: Sale = {
+  ...SALE,
+  total: 75_000,
+  usedDeposit: 15_000,
+  status: "belum",
+  lines: [{ name: "Nasi Goreng", variant: "Normal", qty: 1, price: 25_000, note: "" }],
+};
+
+describe("Deposit terpakai di drawer struk", () => {
+  it("baris Deposit terpakai muncul kalau usedDeposit > 0", () => {
+    render(<Drawer sale={SALE_DEPOSIT} onClose={() => {}} />);
+    expect(screen.getByText(/Deposit terpakai/)).toBeInTheDocument();
+    expect(screen.getByText(/15\.000/)).toBeInTheDocument();
+  });
+
+  it("baris Deposit terpakai tidak muncul kalau usedDeposit 0", () => {
+    render(<Drawer sale={SALE} onClose={() => {}} />);
+    expect(screen.queryByText(/Deposit terpakai/)).toBeNull();
+  });
+
+  it("baris Deposit terpakai tidak muncul kalau usedDeposit undefined", () => {
+    const tanpaDeposit: Sale = { ...SALE, usedDeposit: undefined };
+    render(<Drawer sale={tanpaDeposit} onClose={() => {}} />);
+    expect(screen.queryByText(/Deposit terpakai/)).toBeNull();
+  });
+
+  it("Total dikurangi deposit", () => {
+    render(<Drawer sale={SALE_DEPOSIT} onClose={() => {}} />);
+    /* Total = 75.000 - 15.000 = 60.000. SALE punya total 1000, jadi kalau
+       SALE_DEPOSIT tidak dipakai, 1000 masih muncul: pastikan ini benar. */
+    const totalRow = screen.getByText("Total").closest("div")!;
+    expect(totalRow).toHaveTextContent(/60\.000/);
+    expect(screen.queryByText(/Rp75\.000/)).toBeNull();
+  });
+
+  it("pratinjau Cetak Ulang memuat usedDeposit", async () => {
+    render(<Drawer sale={SALE_DEPOSIT} onClose={() => {}} />);
+    await masukModeCetak();
+    const data = JSON.parse((await screen.findByTestId("struk-data")).textContent ?? "{}");
+    expect(data.usedDeposit).toBe(15_000);
+  });
+});
+
+describe("Pembayaran dengan uang diterima", () => {
+  beforeEach(() => {
+    lunasDiterimaMock.mockReset();
+    lunasDiterimaMock.mockResolvedValue({ ok: true, sisa: 0, deposit: 0 });
+  });
+
+  async function bukaPopupPembayaran() {
+    await userEvent.click(screen.getByRole("button", { name: /^Tandai Lunas$/i }));
+    await screen.findByText("Tagihan");
+    return screen.getAllByRole("dialog")[1]!;
+  }
+
+  it("popup pembayaran terbuka saat Tandai Lunas ditekan", async () => {
+    render(<Drawer sale={SALE_DEPOSIT} onClose={() => {}} onLunasDiterima={lunasDiterimaMock} />);
+    expect(screen.queryByLabelText("Uang diterima")).toBeNull();
+    const dialog = await bukaPopupPembayaran();
+    expect(dialog).toBeInTheDocument();
+    expect(screen.getByText("Tagihan")).toBeInTheDocument();
+    expect(dialog).toHaveTextContent(/Rp\s*60\.000/);
+  });
+
+  it("input Uang diterima tidak muncul tanpa onLunasDiterima", () => {
+    render(<Drawer sale={SALE_DEPOSIT} onClose={() => {}} />);
+    expect(screen.queryByLabelText("Uang diterima")).toBeNull();
+    expect(screen.queryByRole("button", { name: /^Tandai Lunas$/i })).toBeNull();
+  });
+
+  it("chip Uang pas mengisi tagihan efektif", async () => {
+    render(<Drawer sale={SALE_DEPOSIT} onClose={() => {}} onLunasDiterima={lunasDiterimaMock} />);
+    await bukaPopupPembayaran();
+    await userEvent.click(screen.getByRole("button", { name: "Uang pas" }));
+    expect(screen.getByLabelText("Uang diterima")).toHaveValue("60.000");
+    expect(lunasDiterimaMock).not.toHaveBeenCalled();
+  });
+
+  it("menampilkan kembalian sesuai uang diterima", async () => {
+    render(<Drawer sale={SALE_DEPOSIT} onClose={() => {}} onLunasDiterima={lunasDiterimaMock} />);
+    await bukaPopupPembayaran();
+    const input = screen.getByLabelText("Uang diterima");
+    /* Tagihan efektif 60.000; 100.000 → kembalian 40.000. */
+    await userEvent.clear(input);
+    await userEvent.type(input, "100000");
+    const labelEl = screen.getByText("Kembalian");
+    expect(labelEl.parentElement).toHaveTextContent(/Rp 40\.000/);
+  });
+
+  it("tombol Kembalian ke deposit memanggil handler dengan keDeposit=true", async () => {
+    render(<Drawer sale={SALE_DEPOSIT} onClose={() => {}} onLunasDiterima={lunasDiterimaMock} />);
+    await bukaPopupPembayaran();
+    const input = screen.getByLabelText("Uang diterima");
+    await userEvent.clear(input);
+    await userEvent.type(input, "75000");
+    await userEvent.click(screen.getByRole("button", { name: /Kembalian ke deposit/i }));
+    await waitFor(() => expect(lunasDiterimaMock).toHaveBeenCalledWith(SALE_DEPOSIT, 75_000, true));
+    await waitFor(() => expect(screen.queryByText("Tagihan")).toBeNull());
+  });
+
+  it("tombol Kembalikan tunai memanggil handler dengan keDeposit=false", async () => {
+    render(<Drawer sale={SALE_DEPOSIT} onClose={() => {}} onLunasDiterima={lunasDiterimaMock} />);
+    await bukaPopupPembayaran();
+    const input = screen.getByLabelText("Uang diterima");
+    await userEvent.clear(input);
+    await userEvent.type(input, "75000");
+    await userEvent.click(screen.getByRole("button", { name: /Kembalikan tunai/i }));
+    await waitFor(() => expect(lunasDiterimaMock).toHaveBeenCalledWith(SALE_DEPOSIT, 75_000, false));
+  });
+
+  it("memuat usedDeposit di pratinjau Cetak Ulang bersama onLunasDiterima", async () => {
+    render(
+      <Drawer
+        sale={SALE_DEPOSIT}
+        onClose={() => {}}
+        onSimpan={simpanMock}
+        onLunasDiterima={lunasDiterimaMock}
+      />,
+    );
+    await masukModeCetak();
+    const data = JSON.parse((await screen.findByTestId("struk-data")).textContent ?? "{}");
+    expect(data.usedDeposit).toBe(15_000);
+  });
+
+  it("popup mulai dengan nominal pas dan aksi aktif", async () => {
+    render(<Drawer sale={SALE_DEPOSIT} onClose={() => {}} onLunasDiterima={lunasDiterimaMock} />);
+    await bukaPopupPembayaran();
+    expect(screen.getByLabelText("Uang diterima")).toHaveValue("60.000");
+    expect(screen.getByRole("button", { name: /Kembalian ke deposit/i })).toBeEnabled();
+    expect(screen.getByRole("button", { name: /Kembalikan tunai/i })).toBeEnabled();
+  });
+
+  it("aksi pembayaran nonaktif saat uang diterima kurang dari tagihan", async () => {
+    render(<Drawer sale={SALE_DEPOSIT} onClose={() => {}} onLunasDiterima={lunasDiterimaMock} />);
+    await bukaPopupPembayaran();
+    const input = screen.getByLabelText("Uang diterima");
+    await userEvent.clear(input);
+    await userEvent.type(input, "50000");
+    expect(screen.getByRole("button", { name: /Kembalian ke deposit/i })).toBeDisabled();
+    expect(screen.getByRole("button", { name: /Kembalikan tunai/i })).toBeDisabled();
+  });
+
+  it("error tampil di popup dan popup tetap terbuka", async () => {
+    lunasDiterimaMock.mockResolvedValue({ ok: false, pesan: "Pembayaran gagal dicatat." });
+    render(<Drawer sale={SALE_DEPOSIT} onClose={() => {}} onLunasDiterima={lunasDiterimaMock} />);
+    const dialog = await bukaPopupPembayaran();
+    await userEvent.click(screen.getByRole("button", { name: /Kembalian ke deposit/i }));
+    expect(await screen.findByRole("alert")).toHaveTextContent("Pembayaran gagal dicatat.");
+    expect(dialog).toBeInTheDocument();
+  });
+
+  it("pesan sukses muncul di drawer setelah popup ditutup", async () => {
+    render(<Drawer sale={SALE_DEPOSIT} onClose={() => {}} onLunasDiterima={lunasDiterimaMock} />);
+    await bukaPopupPembayaran();
+    await userEvent.click(screen.getByRole("button", { name: /Kembalian ke deposit/i }));
+    expect(await screen.findByText(/Pembayaran dicatat — struk ini sekarang Lunas/i)).toBeInTheDocument();
+    await waitFor(() => expect(screen.queryByText("Tagihan")).toBeNull());
+  });
+
+  it("Tandai Lunas lama tetap muncul kalau hanya onLunas disediakan", () => {
+    render(<Drawer sale={SALE_DEPOSIT} onClose={() => {}} onLunas={vi.fn()} />);
+    expect(screen.getByRole("button", { name: /Tandai Lunas/i })).toBeInTheDocument();
+    expect(screen.queryByLabelText("Uang diterima")).toBeNull();
+  });
+});
+
+/* -------------------------------------------------------------------------
+   Batalkan Lunas
+   -------------------------------------------------------------------------- */
+
+const SALE_LUNAS: Sale = {
+  ...SALE,
+  status: "lunas",
+  total: 100_000,
+  usedDeposit: 25_000,
+  lines: [{ name: "Nasi Goreng", variant: "Normal", qty: 2, price: 25_000 }],
+};
+
+const batalLunasMock = vi.fn<(s: Sale) => void>();
+
+describe("Batalkan Lunas di drawer struk", () => {
+  beforeEach(() => {
+    batalLunasMock.mockReset();
+  });
+
+  it("tombol muncul kalau status lunas dan onBatalLunas disediakan", () => {
+    render(<Drawer sale={SALE_LUNAS} onClose={() => {}} onBatalLunas={batalLunasMock} />);
+    expect(screen.getByRole("button", { name: /Batalkan Lunas/i })).toBeInTheDocument();
+  });
+
+  it("tombol tidak muncul kalau status belum", () => {
+    render(<Drawer sale={SALE_DEPOSIT} onClose={() => {}} onBatalLunas={batalLunasMock} />);
+    expect(screen.queryByRole("button", { name: /Batalkan Lunas/i })).toBeNull();
+  });
+
+  it("tombol tidak muncul kalau status terhapus", () => {
+    const terhapus: Sale = { ...SALE_LUNAS, status: "terhapus" };
+    render(<Drawer sale={terhapus} onClose={() => {}} onBatalLunas={batalLunasMock} />);
+    expect(screen.queryByRole("button", { name: /Batalkan Lunas/i })).toBeNull();
+  });
+
+  it("tombol tidak muncul tanpa onBatalLunas", () => {
+    render(<Drawer sale={SALE_LUNAS} onClose={() => {}} />);
+    expect(screen.queryByRole("button", { name: /Batalkan Lunas/i })).toBeNull();
+  });
+
+  it("teks bantuan menjelaskan akibatnya", () => {
+    render(<Drawer sale={SALE_LUNAS} onClose={() => {}} onBatalLunas={batalLunasMock} />);
+    expect(screen.getByText(/menghapus riwayat pembayaran/i)).toBeInTheDocument();
+    expect(screen.getByText(/mengembalikan deposit/i)).toBeInTheDocument();
+  });
+
+  it("memanggil handler dengan sale yang benar", async () => {
+    render(<Drawer sale={SALE_LUNAS} onClose={() => {}} onBatalLunas={batalLunasMock} />);
+    await userEvent.click(screen.getByRole("button", { name: /Batalkan Lunas/i }));
+    expect(batalLunasMock).toHaveBeenCalledWith(SALE_LUNAS);
   });
 });

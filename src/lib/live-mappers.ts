@@ -189,6 +189,7 @@ export function mapStruk(row: SaleRow, items: SaleItemRow[] = []): Sale {
     courier: undefined, // tidak ada kolomnya di tabel sales
     ongkir: ongkirDari(row),
     diskon: n(row.discount),
+    usedDeposit: n(row.deposit_used),
     lines,
   };
 }

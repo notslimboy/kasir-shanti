@@ -62,6 +62,8 @@ export type Sale = {
   queueNo?: number | null;
   ongkir?: number;
   diskon?: number;
+  /** Deposit yang dipotong otomatis dari saldo customer. */
+  usedDeposit?: number;
   lines: SaleLine[];
 };
 

@@ -1,3 +1,5 @@
+import { headerRest, SUPABASE_URL } from "@/supabase/client";
+
 /* ==========================================================================
    Resolusi customer untuk pencatatan piutang.
 
@@ -91,6 +93,34 @@ export function pilihCustomer(
       ),
     )
   );
+}
+
+/**
+ * Catat mutasi deposit ke tabel ledger.
+ *
+ * Gagal insert hanya di-log/diabaikan supaya alur uang tidak berhenti
+ * gara-gara audit log.
+ */
+export async function catatMutasiDeposit(input: {
+  customerId: number;
+  saleId?: number | null;
+  amount: number;
+  note?: string;
+}): Promise<void> {
+  try {
+    await fetch(`${SUPABASE_URL}/rest/v1/deposit_ledger`, {
+      method: "POST",
+      headers: { ...headerRest(), "Content-Type": "application/json", Prefer: "return=minimal" },
+      body: JSON.stringify({
+        customer_id: input.customerId,
+        sale_id: input.saleId ?? null,
+        amount: input.amount,
+        note: input.note ?? "",
+      }),
+    });
+  } catch {
+    // gagal insert tidak menggagalkan alur utama
+  }
 }
 
 /**

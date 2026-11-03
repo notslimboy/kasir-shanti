@@ -25,6 +25,7 @@ export interface SaleRow {
   deleted_at: string | null;
   stock_restored_on_delete: number | boolean;
   paid_amount: number;
+  deposit_used: number;
   created_at: string;
   queue_no: number | null;
   queue_date: string;
@@ -110,6 +111,15 @@ export interface CustomerRow {
   tag: string | null;
 }
 
+export interface DepositLedgerRow {
+  id: number;
+  customer_id: number;
+  sale_id: number | null;
+  amount: number;
+  note: string;
+  created_at: string;
+}
+
 export interface CustomerAliasRow {
   id: number;
   customer_id: number;
@@ -137,6 +147,7 @@ export interface Database {
       product_variants: Table<ProductVariantRow>;
       customers: Table<CustomerRow>;
       customer_aliases: Table<CustomerAliasRow>;
+      deposit_ledger: Table<DepositLedgerRow>;
     };
     Views: Record<string, never>;
     Functions: Record<string, never>;

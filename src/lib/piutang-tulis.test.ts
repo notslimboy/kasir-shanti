@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { batalkanLunasPiutang, catatPembayaranPiutang, lunasKanPiutang } from "@/lib/piutang-tulis";
+import { batalkanLunasPiutang, catatPembayaranPiutang, lunasDenganUangDiterima, lunasKanPiutang } from "@/lib/piutang-tulis";
 
 /* ==========================================================================
    Bukti rollback untuk catat pembayaran piutang.
@@ -59,6 +59,8 @@ function tiru({
       return json({ message: "denied" }, depositGagal ? 403 : 200);
     }
     if (method === "PATCH" && url.includes("/rest/v1/sales")) return json([{ id: 7 }]);
+    // deposit_ledger POST
+    if (method === "POST" && url.includes("/rest/v1/deposit_ledger")) return json([{ id: 1 }]);
     if (method === "DELETE") return json([]);
 
     return json([]);
@@ -79,6 +81,14 @@ describe("catatPembayaranPiutang", () => {
     }
     const patchCustomer = p.find((c) => c.method === "PATCH" && c.url.includes("/rest/v1/customers"));
     expect(JSON.parse(patchCustomer!.body!).deposit_balance).toBe(50_000);
+
+    // deposit_ledger tercatat
+    const ledger = p.filter((c) => c.method === "POST" && c.url.includes("/rest/v1/deposit_ledger"));
+    expect(ledger).toHaveLength(1);
+    const body = JSON.parse(ledger[0].body!);
+    expect(body.customer_id).toBe(164);
+    expect(body.amount).toBe(50_000);
+    expect(body.note).toContain("SH-1");
   });
 
   /* Yang diuji di sini: tidak ada sisa setengah jadi. */
@@ -98,6 +108,10 @@ describe("catatPembayaranPiutang", () => {
     const patchSales = p.filter((c) => c.method === "PATCH" && c.url.includes("/rest/v1/sales"));
     const terakhir = patchSales[patchSales.length - 1];
     expect(JSON.parse(terakhir.body!).paid_amount).toBe(0);
+
+    /* deposit_ledger tidak boleh tercatat karena PATCH customers gagal */
+    const ledger = p.filter((c) => c.method === "POST" && c.url.includes("/rest/v1/deposit_ledger"));
+    expect(ledger).toHaveLength(0);
   });
 
   /* Nominal divalidasi lebih dulu, sebelum satu pun request. Menolak tanpa
@@ -221,6 +235,7 @@ describe("batalkanLunasPiutang", () => {
         const id = Number(url.split("id=eq.")[1]);
         return json({ id });
       }
+      if (method === "POST" && url.includes("/rest/v1/deposit_ledger")) return json([{ id: 1 }]);
       if (method === "DELETE" && url.includes("sale_payments")) {
         dihapus.push(...url.split("sale_id=eq.")[1].split(",").map(Number));
         return json([]);
@@ -243,6 +258,15 @@ describe("batalkanLunasPiutang", () => {
     expect(patch).toBeDefined();
     /* Kelebihan Rp 50.000 dikeluarkan lagi: 50.000 - 50.000 = 0. */
     expect(JSON.parse(patch!.body!).deposit_balance).toBe(0);
+
+    /* deposit_ledger tercatat untuk pembatalan */
+    const ledger = panggilan.filter((c) => c.method === "POST" && c.url.includes("/rest/v1/deposit_ledger"));
+    expect(ledger).toHaveLength(1);
+    const body = JSON.parse(ledger[0].body!);
+    expect(body.customer_id).toBe(164);
+    expect(body.amount).toBe(-50_000);
+    expect(body.note).toContain("Pembatalan");
+    expect(body.note).toContain("SH-1");
   });
 
   /* Yang diperbaiki: nama di struk "Memet 22 " (ada spasi akhir) atau
@@ -284,5 +308,107 @@ describe("batalkanLunasPiutang", () => {
     const patch = panggilan.find((c) => c.method === "PATCH" && c.url.includes("/rest/v1/sales"));
     expect(patch).toBeDefined();
     expect(JSON.parse(patch!.body!)).toHaveProperty("paid_amount", 0);
+  });
+});
+
+/* ==========================================================================
+   lunasDenganUangDiterima — pelunasan dengan kelebihan masuk deposit/kembali.
+
+   Dua mode: keDeposit (kelebihan masuk deposit) dan
+   tunai (hanya sisa dibayar, kembalian dikembalikan).
+   ========================================================================== */
+
+describe("lunasDenganUangDiterima", () => {
+  function tiru() {
+    const panggilan: Panggilan[] = [];
+
+    globalThis.fetch = vi.fn(async (input: string | URL, init?: RequestInit) => {
+      const url = String(input);
+      const method = init?.method ?? "GET";
+      panggilan.push({ url, method, body: (init?.body as string) ?? null });
+
+      const json = (v: unknown, status = 200) => ({
+        ok: status < 400,
+        status,
+        json: async () => v,
+      });
+
+      // GET sales: struk 100rb, belum dibayar
+      if (method === "GET" && url.includes("/rest/v1/sales?"))
+        return json([{ id: 7, total: 100_000, paid_amount: 40_000, customer_name: "Memet 22", receipt_no: "SH-1" }]);
+      if (method === "GET" && url.includes("/rest/v1/customers?"))
+        return json([{ id: 164, name: "Memet 22", deposit_balance: 0 }]);
+      if (method === "GET" && url.includes("/rest/v1/customer_aliases?"))
+        return json([]);
+      if (method === "POST" && url.includes("/rest/v1/sale_payments"))
+        return json([{ id: 555 }]);
+      if (method === "PATCH" && url.includes("/rest/v1/customers"))
+        return json({ message: "ok" }, 200);
+      if (method === "PATCH" && url.includes("/rest/v1/sales"))
+        return json([{ id: 7 }]);
+      if (method === "DELETE") return json([]);
+      return json([]);
+    }) as unknown as typeof fetch;
+
+    return panggilan;
+  }
+
+  it("keDeposit=true: nominal penuh terkirim, kelebihan jadi deposit", async () => {
+    const p = tiru();
+    const hasil = await lunasDenganUangDiterima(7, 100_000, true);
+    expect(hasil.ok).toBe(true);
+    if (!hasil.ok) return;
+
+    expect(hasil.sisa).toBe(0);
+    /* sisa = 60.000 (100.000 - 40.000). Bayar 100.000 → deposit 40.000. */
+    expect(hasil.deposit).toBe(40_000);
+    expect(hasil.kembalian).toBeUndefined();
+
+    const tulis = JSON.parse(p.filter((x) => x.method === "POST" && x.url.includes("sale_payments"))[0].body!);
+    expect(tulis.amount).toBe(100_000);
+  });
+
+  it("keDeposit=false: hanya sisa yang dibayar, kembalian dikembalikan", async () => {
+    const p = tiru();
+    const hasil = await lunasDenganUangDiterima(7, 100_000, false);
+    expect(hasil.ok).toBe(true);
+    if (!hasil.ok) return;
+
+    /* sisa = 60.000. Yang dikirim ke catatPembayaranPiutang hanya 60.000 */
+    expect(hasil.sisa).toBe(0);
+    expect(hasil.deposit).toBe(0);
+    expect(hasil.kembalian).toBe(40_000);
+
+    const tulis = JSON.parse(p.filter((x) => x.method === "POST" && x.url.includes("sale_payments"))[0].body!);
+    expect(tulis.amount).toBe(60_000);
+  });
+
+  it("uangDiterima kurang dari sisa: tetap bayar sisa penuh, tidak ada deposit", async () => {
+    const p = tiru();
+    const hasil = await lunasDenganUangDiterima(7, 30_000, false);
+    expect(hasil.ok).toBe(true);
+    if (!hasil.ok) return;
+
+    /* Yang dibayar = sisa = 60.000, jadi sisa hasil = 0, bukan 30.000. */
+    expect(hasil.sisa).toBe(0);
+    expect(hasil.deposit).toBe(0);
+    expect(hasil.kembalian).toBe(0);
+
+    const tulis = JSON.parse(p.filter((x) => x.method === "POST" && x.url.includes("sale_payments"))[0].body!);
+    expect(tulis.amount).toBe(60_000);
+  });
+
+  it("menolak struk yang sudah lunas", async () => {
+    globalThis.fetch = vi.fn(async (input: string | URL, init?: RequestInit) => {
+      const url = String(input);
+      const method = init?.method ?? "GET";
+      if (method === "GET" && url.includes("/rest/v1/sales?"))
+        return { ok: true, status: 200, json: async () => [{ id: 7, total: 100_000, paid_amount: 100_000, customer_name: "X", receipt_no: "SH-1" }] };
+      return { ok: true, status: 200, json: async () => [] };
+    }) as unknown as typeof fetch;
+
+    const hasil = await lunasDenganUangDiterima(7, 50_000, true);
+    expect(hasil.ok).toBe(false);
+    if (!hasil.ok) expect(hasil.pesan).toMatch(/lunas/i);
   });
 });

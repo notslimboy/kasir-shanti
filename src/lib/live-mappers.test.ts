@@ -40,6 +40,7 @@ const struk = (p: Partial<SaleRow> = {}): SaleRow => ({
   deleted_at: null,
   stock_restored_on_delete: 0,
   paid_amount: 0,
+  deposit_used: 0,
   created_at: "2026-09-29T07:01:34.775276+00:00",
   queue_no: 53,
   queue_date: "2026-09-29",
@@ -232,6 +233,16 @@ describe("mapStruk", () => {
     const s = mapStruk(struk(), []);
     expect(s.itemCount).toBe(0);
     expect(s.lines).toEqual([]);
+  });
+
+  it("deposit_used dari database dipetakan ke usedDeposit", () => {
+    const s = mapStruk(struk({ deposit_used: 15_000 }));
+    expect(s.usedDeposit).toBe(15_000);
+  });
+
+  it("deposit_used 0 tidak hilang — bisa dibedakan dari undefined", () => {
+    const s = mapStruk(struk({ deposit_used: 0 }));
+    expect(s.usedDeposit).toBe(0);
   });
 });
 

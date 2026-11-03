@@ -397,7 +397,9 @@ export async function ubahCustomer(input: UbahCustomerInput): Promise<HasilTulis
       body: JSON.stringify({
         name: nama,
         tag,
-        deposit_balance: n(input.deposit),
+        deposit_balance: n(input.deposit),  /* NOTE: selisih deposit tidak dicatat ke deposit_ledger
+                                               karena nilai lama tidak dibaca. Risiko rendah: ini
+                                               hanya dipakai dari form Ubah Customer yang jarang. */
         default_shipping: n(input.ongkir),
         updated_at: new Date().toISOString(),
       }),

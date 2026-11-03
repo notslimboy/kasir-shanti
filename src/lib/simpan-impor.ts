@@ -187,6 +187,7 @@ export async function simpanPesananImpor(
          `simpan-penjualan.ts` — dua jalur tulis ini harus sepakat, kalau
          tidak, status awal struk bergantung pada dari mana ia dibuat. */
       paid_amount: 0,
+      deposit_used: 0,
       created_at: prosesIso,
       queue_no: queueNo,
       queue_date: tanggal,

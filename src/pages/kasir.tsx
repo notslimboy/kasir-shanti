@@ -123,6 +123,7 @@ export function KasirPage() {
     shipping: hasil.struk.shipping,
     total: hasil.struk.total,
     items: hasil.struk.items,
+    usedDeposit: hasil.struk.usedDeposit,
   });
 
   const say = (text: string, tone: "ok" | "warn" = "ok") => {
@@ -385,6 +386,14 @@ export function KasirPage() {
 
   const subtotal = cart.reduce((a, i) => a + i.price * i.qty, 0);
   const total = Math.max(0, subtotal - diskon + ongkir);
+  const saldoCustomer = (() => {
+    const nama = customer.trim().toLowerCase();
+    if (!nama) return 0;
+    const cocok = live.customers.find((c) => c.name.trim().toLowerCase() === nama);
+    return cocok?.deposit ?? 0;
+  })();
+  const dipakai = Math.max(0, Math.min(saldoCustomer, total));
+  const totalBayar = total - dipakai;
 
   /* Saran customer untuk dropdown keranjang. Alias diambil dari
      `customer_aliases` dan sudah terikat ke nama aslinya — jadi
@@ -436,6 +445,7 @@ export function KasirPage() {
         diskon,
         note: "",
         sendNote: "",
+        usedDeposit: dipakai,
       });
       setCart([]);
       setSCatatan(null);
@@ -454,6 +464,7 @@ export function KasirPage() {
       await cacheKosongkanKecuali(KUNCI_HOLD);
       await live.muatUlang();
       say(`${hasil.receiptNo} tersimpan`);
+      if (hasil.peringatanDeposit) say(hasil.peringatanDeposit, "warn");
       /* printFlow "preview" berarti struk sengaja BELUM dicetak: kasir
          memeriksa tampilannya dulu lewat tombol "Cetak Struk". */
       if (cetak && setelan.autoPrint && setelan.printFlow === "direct") void cetakHasil(hasil);
@@ -661,9 +672,17 @@ export function KasirPage() {
             />
           </MiniField>
         </div>
+        {dipakai > 0 && (
+          <div className="flex items-baseline justify-between pt-0.5">
+            <span className="text-sm font-semibold text-muted-foreground">Potongan Deposit</span>
+            <span className="text-lg font-bold tracking-tight figure">-{rupiah(dipakai)}</span>
+          </div>
+        )}
         <div className="flex items-baseline justify-between pt-0.5">
-          <span className="text-sm font-semibold text-muted-foreground">Total</span>
-          <span className="text-lg font-bold tracking-tight figure">{rupiah(total)}</span>
+          <span className="text-sm font-semibold text-muted-foreground">
+            {dipakai > 0 ? "TOTAL BAYAR" : "Total"}
+          </span>
+          <span className="text-lg font-bold tracking-tight figure">{rupiah(totalBayar)}</span>
         </div>
       </div>
 
@@ -707,7 +726,7 @@ export function KasirPage() {
             ? "Menyimpan…"
             : hargaBelumLengkap
               ? "Isi harga custom dulu"
-              : `Bayar ${rupiah(total)}`}
+              : `Bayar ${rupiah(totalBayar)}`}
         </button>
       </div>
     </>
@@ -994,8 +1013,8 @@ export function KasirPage() {
           <span className="font-semibold">
             <Pop n={cart.length}>{cart.length} item</Pop>
           </span>
-          <Pop n={total} className="font-bold figure">
-            {rupiah(total)}
+          <Pop n={totalBayar} className="font-bold figure">
+            {rupiah(totalBayar)}
           </Pop>
         </button>
 

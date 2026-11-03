@@ -1,7 +1,7 @@
 import { SUPABASE_URL, headerRest } from "@/supabase/client";
 import type { SalePaymentRow, SaleRow } from "@/supabase/types";
 import { penyesuaianDeposit, sisaPiutang } from "./piutang";
-import { paidSetelahBatal, pilihCustomer, type CustomerDeposit } from "./customer-deposit";
+import { catatMutasiDeposit, paidSetelahBatal, pilihCustomer, type CustomerDeposit } from "./customer-deposit";
 
 /* ==========================================================================
    Menulis piutang ke Supabase.
@@ -64,7 +64,7 @@ async function ambilStruk(saleId: number): Promise<SaleRow> {
  * kasir tidak bisa mencatat pembayaran untuk orang yang belum pernah order,
  * dan itu lebih buruk.
  */
-async function tambahDeposit(nama: string, jumlah: number): Promise<void> {
+async function tambahDeposit(nama: string, jumlah: number, receiptNo: string): Promise<void> {
   if (!nama || jumlah <= 0) return;
 
   const customer = await cariCustomerUntukDeposit(nama);
@@ -73,6 +73,7 @@ async function tambahDeposit(nama: string, jumlah: number): Promise<void> {
       deposit_balance: n(customer.deposit_balance) + jumlah,
       updated_at: new Date().toISOString(),
     });
+    await catatMutasiDeposit({ customerId: customer.id, amount: jumlah, note: `Kelebihan bayar struk ${receiptNo}` });
     return;
   }
   const buat = await fetch(`${SUPABASE_URL}/rest/v1/customers`, {
@@ -82,10 +83,15 @@ async function tambahDeposit(nama: string, jumlah: number): Promise<void> {
   });
   /* `customers.name` punya constraint UNIQUE. Kalau baris dengan nama itu
      sebenarnya ada tetapi tidak ketemu di langkah sebelumnya — misalnya
-    kebijakan SELECT tidak berlaku sementara POST berlaku — POST-nya ditolak
+     kebijakan SELECT tidak berlaku sementara POST berlaku — POST-nya ditolak
      dengan 409. Itu bukan kegagalan: baris yang sama sudah ada, jadi deposit
      ditambahkan ke sana, persis seperti cabang di atas. */
-  if (buat.ok) return;
+  if (buat.ok) {
+    const dibuat = (await buat.json()) as { id?: number }[];
+    const idBaru = dibuat?.[0]?.id;
+    if (idBaru) await catatMutasiDeposit({ customerId: idBaru, amount: jumlah, note: `Kelebihan bayar ${receiptNo}` });
+    return;
+  }
   if (buat.status === 409) {
     const ulang = await cariCustomerUntukDeposit(nama);
     if (ulang) {
@@ -93,6 +99,7 @@ async function tambahDeposit(nama: string, jumlah: number): Promise<void> {
         deposit_balance: n(ulang.deposit_balance) + jumlah,
         updated_at: new Date().toISOString(),
       });
+      await catatMutasiDeposit({ customerId: ulang.id, amount: jumlah, note: `Kelebihan bayar struk ${receiptNo}` });
       return;
     }
   }
@@ -180,7 +187,7 @@ export async function catatPembayaranPiutang(
 
     try {
       await patch(`sales?id=eq.${saleId}`, { paid_amount: n(sale.paid_amount) + untukUtang });
-      await tambahDeposit(String(sale.customer_name ?? ""), untukDeposit);
+      await tambahDeposit(String(sale.customer_name ?? ""), untukDeposit, sale.receipt_no);
     } catch (e) {
       /* Pembayaran sudah tercatat sebelum langkah ini gagal. Kembalikan lagi —
          pembayaran setengah jadi lebih buruk daripada tidak ada: kasir mengira
@@ -203,6 +210,45 @@ export async function catatPembayaranPiutang(
   } catch (e) {
     return { ok: false, pesan: (e as Error).message };
   }
+}
+
+/**
+ * Lunasi piutang dengan uang yang diterima di kasir.
+ *
+ * `keDeposit=true`: nominal penuh dicatat, kelebihan masuk deposit customer.
+ * `keDeposit=false`: hanya sisa tagihan yang dicatat, kelebihan dikembalikan
+ *                    tunai (dilaporkan lewat `kembalian` di hasil).
+ *
+ * Catatan: kelebihan tetap masuk deposit lewat mekanisme
+ * `catatPembayaranPiutang` yang sudah ada — bedanya hanya berapa nominal
+ * yang dikirim ke fungsi itu.
+ */
+export async function lunasDenganUangDiterima(
+  saleId: number,
+  uangDiterima: number,
+  keDeposit: boolean,
+  note = "Pembayaran di kasir",
+): Promise<HasilPiutang & { kembalian?: number }> {
+  let sale: SaleRow;
+  try {
+    sale = await ambilStruk(saleId);
+  } catch (e) {
+    return { ok: false, pesan: (e as Error).message };
+  }
+  const sisa = sisaPiutang(sale);
+  if (sisa <= 0) return { ok: false, pesan: "Transaksi ini sudah lunas." };
+
+  if (keDeposit) {
+    /* Bayar nominal penuh — kelebihan masuk deposit otomatis. */
+    return catatPembayaranPiutang(saleId, Math.max(uangDiterima, sisa), note);
+  }
+
+  /* Tanpa deposit: bayar tepat sisa tagihan, kembalian dikembalikan. */
+  const hasil = await catatPembayaranPiutang(saleId, sisa, note);
+  if (hasil.ok) {
+    return { ...hasil, kembalian: Math.max(0, uangDiterima - sisa) };
+  }
+  return hasil;
 }
 
 /**
@@ -266,7 +312,7 @@ export async function batalkanLunasPiutang(saleId: number): Promise<HasilPiutang
        deposit gagal, customer kehilangan Rp-nya tanpa ada jejaknya — dan
        pembatalan tidak bisa diulang karena riwayatnya sudah hilang. */
     const adjust = penyesuaianDeposit(baris);
-    if (adjust !== 0) await geserDeposit(String(sale.customer_name ?? ""), adjust);
+    if (adjust !== 0) await geserDeposit(String(sale.customer_name ?? ""), adjust, sale.receipt_no);
 
     const hapus = await fetch(`${SUPABASE_URL}/rest/v1/sale_payments?sale_id=eq.${saleId}`, {
       method: "DELETE",
@@ -305,7 +351,7 @@ export async function batalkanLunasPiutang(saleId: number): Promise<HasilPiutang
  * dihapus — jadi lebih baik depositnya tidak dikembalikan daripada
  * pembatalannya seluruhnya ditolak.
  */
-async function geserDeposit(nama: string, posisi: number): Promise<void> {
+async function geserDeposit(nama: string, posisi: number, receiptNo: string): Promise<void> {
   if (!nama || posisi === 0) return;
   const customer = await cariCustomerUntukDeposit(nama);
   if (!customer) return;
@@ -313,4 +359,5 @@ async function geserDeposit(nama: string, posisi: number): Promise<void> {
     deposit_balance: Math.max(0, n(customer.deposit_balance) + posisi),
     updated_at: new Date().toISOString(),
   });
+  await catatMutasiDeposit({ customerId: customer.id, amount: posisi, note: `Pembatalan lunas struk ${receiptNo}` });
 }

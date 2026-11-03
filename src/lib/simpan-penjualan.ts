@@ -1,5 +1,6 @@
 import { headerRest, SUPABASE_URL } from "@/supabase/client";
 import type { CustomerRow, SaleItemRow, SaleRow } from "@/supabase/types";
+import { catatMutasiDeposit } from "./customer-deposit";
 
 /* ==========================================================================
    Menyimpan satu transaksi dari halaman Kasir.
@@ -41,6 +42,9 @@ export type PayloadJual = {
   sendNote: string;
   /** Waktu transaksi; default sekarang. */
   completedAt?: Date;
+  /** Deposit customer yang dipakai otomatis. Dihitung di luar oleh pemanggil
+      (min(saldo deposit, total)) lalu dikirim ke sini. */
+  usedDeposit?: number;
 };
 
 export type HasilJual = {
@@ -59,8 +63,13 @@ export type HasilJual = {
     shipping: number;
     discount: number;
     total: number;
+    /** Deposit yang dipotong dari total. */
+    usedDeposit: number;
     items: { name: string; variant: string; qty: number; price: number; lineTotal: number; note: string }[];
   };
+  /** Peringatan jika pengurangan saldo deposit gagal. Transaksi tetap
+      tersimpan — deposit terpakai tercatat di struk. */
+  peringatanDeposit?: string;
 };
 
 const n = (v: unknown) => (typeof v === "number" && Number.isFinite(v) ? v : Number(v ?? 0) || 0);
@@ -206,6 +215,43 @@ async function sentuhCustomer(nama: string, ongkir: number, completedAt: Date): 
 }
 
 /**
+ * Kurangi saldo deposit customer.
+ *
+ * Dipanggil setelah struk berhasil tersimpan. Kalau gagal, transaksi tetap
+ * jadi — deposit terpakai sudah tercatat di `deposit_used` dan pemanggil
+ * bisa melihat peringatan lewat `HasilJual.peringatanDeposit`.
+ */
+async function kurangiDepositCustomer(nama: string, jumlah: number, saleId: number, receiptNo: string): Promise<void> {
+  const namaBersih = String(nama || "").trim();
+  if (!namaBersih || jumlah <= 0) return;
+  const headers = { ...headerRest(), "Content-Type": "application/json", Prefer: "return=representation" };
+  const url = new URL(`${SUPABASE_URL}/rest/v1/customers`);
+  url.searchParams.set("name", `eq.${encodeURIComponent(namaBersih)}`);
+  url.searchParams.set("select", "id,name,deposit_balance");
+  const cari = await fetch(url, { headers: headerRest() });
+  if (!cari.ok) throw new Error(`Gagal membaca customer (${cari.status}).`);
+  const ada = (await cari.json()) as Pick<CustomerRow, "id" | "name" | "deposit_balance">[];
+  if (!ada[0]) {
+    /* Customer tidak ada di tabel — deposit tidak bisa dikurangi. Transaksi
+       tetap jadi, peringatan dikembalikan. */
+    return;
+  }
+  const saldoBaru = Math.max(0, n(ada[0].deposit_balance) - jumlah);
+  const patch = await fetch(`${SUPABASE_URL}/rest/v1/customers?id=eq.${ada[0].id}`, {
+    method: "PATCH",
+    headers,
+    body: JSON.stringify({ deposit_balance: saldoBaru, updated_at: new Date().toISOString() }),
+  });
+  if (!patch.ok) throw new Error(`Gagal mengupdate deposit (${patch.status}).`);
+  await catatMutasiDeposit({
+    customerId: ada[0].id,
+    saleId,
+    amount: -jumlah,
+    note: `Dipakai di struk ${receiptNo}`,
+  });
+}
+
+/**
  * Simpan transaksi lengkap.
  *
  * Kalau sale_items gagal, struk yang sudah terlanjur tertulis DIHAPUS.
@@ -222,6 +268,8 @@ export async function simpanPenjualan(payload: PayloadJual): Promise<HasilJual> 
   const ongkir = Math.max(0, n(payload.ongkir));
   const diskon = Math.max(0, n(payload.diskon));
   const total = Math.max(0, subtotal - diskon + ongkir);
+  /* Deposit dipotong dari total, tidak boleh melebihi total. */
+  const deposit = Math.max(0, Math.min(n(payload.usedDeposit), total));
   const receiptNo = await nomorStrukBerikutnya(completedAt);
   const queueNo = await nomorAntreanBerikutnya(completedAt);
   const headers = {
@@ -230,6 +278,10 @@ export async function simpanPenjualan(payload: PayloadJual): Promise<HasilJual> 
     Prefer: "return=representation",
   };
 
+  /* Deposit dianggap pembayaran langsung atas struk ini. `paid_amount`
+     diisi deposit supaya status "Belum Lunas"/"Lunas" konsisten: kalau
+     deposit ≥ total, struk langsung lunas. `total` tetap = subtotal −
+     diskon + ongkir, tidak berubah. */
   const sale: Omit<SaleRow, "id"> = {
     receipt_no: receiptNo,
     completed_at: completedAt.toISOString(),
@@ -250,13 +302,11 @@ export async function simpanPenjualan(payload: PayloadJual): Promise<HasilJual> 
     chat_date: tanggal,
     deleted_at: null,
     stock_restored_on_delete: 0,
-    /* Struk baru lahir BELUM LUNAS. Sengaja tidak meniru versi lama yang
-       menulis `paid_amount: total` di sini: pelunasan dicatat di halaman
-       Piutang, dan struk yang lahir sudah "Lunas" membuat piutang kemarin
-       lenyap begitu struk hari ini dibuat — tidak ada lagi yang tahu mana
-       yang benar-benar sudah dibayar. Mengubah ini berarti mengubah arti
-       angka di seluruh laporan, jadi jangan "diperbaiki" balik. */
-    paid_amount: 0,
+    /* Deposit dipotong otomatis: tercatat di kolom ini supaya Cetak Ulang
+       tetap tahu besarnya. Deposit juga langsung dianggap pelunasan —
+       lihat paid_amount di bawah. */
+    deposit_used: deposit,
+    paid_amount: deposit,
     created_at: completedAt.toISOString(),
     queue_no: queueNo,
     queue_date: tanggal,
@@ -287,6 +337,17 @@ export async function simpanPenjualan(payload: PayloadJual): Promise<HasilJual> 
   await kurangiStok(items);
   await sentuhCustomer(payload.customer, ongkir, completedAt);
 
+  /* Kurangi saldo deposit customer — jangan gagalkan transaksi kalau
+     PATCH-nya gagal, struk sudah tersimpan. */
+  let peringatanDeposit: string | undefined;
+  if (deposit > 0) {
+    try {
+      await kurangiDepositCustomer(payload.customer, deposit, id, receiptNo);
+    } catch (e) {
+      peringatanDeposit = `Saldo deposit tidak bisa dikurangi: ${(e as Error).message}`;
+    }
+  }
+
   return {
     id,
     receiptNo,
@@ -302,6 +363,7 @@ export async function simpanPenjualan(payload: PayloadJual): Promise<HasilJual> 
       shipping: ongkir,
       discount: diskon,
       total,
+      usedDeposit: deposit,
       items: items.map((it) => ({
         name: it.menuName || it.name,
         variant: it.variantName || "",
@@ -311,5 +373,6 @@ export async function simpanPenjualan(payload: PayloadJual): Promise<HasilJual> 
         note: it.note || "",
       })),
     },
+    peringatanDeposit,
   };
 }

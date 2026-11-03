@@ -1,7 +1,8 @@
 import { useMemo, useRef, useState } from "react";
-import { AnimatePresence, motion } from "motion/react";
+import { AnimatePresence, MotionConfig, motion } from "motion/react";
 
 import { Drawer } from "@/components/ui/drawer";
+import { Modal } from "@/components/ui/modal";
 import { Struk, type StrukHandle } from "@/components/struk";
 import { Pill } from "@/components/ui/card";
 import { btnGhost, btnPrimary, inputClass } from "@/components/ui/kit";
@@ -106,6 +107,8 @@ export function StrukDrawer({
   onHapusPermanen,
   onSimpan,
   onLunas,
+  onLunasDiterima,
+  onBatalLunas,
   onUbahTag,
   produk,
   onMintaProduk,
@@ -129,6 +132,13 @@ export function StrukDrawer({
   /** Tandai struk ini lunas (cicil tepat sebanyak sisa). Kosong = tombol
    *  Tandai Lunas disembunyikan, sama seperti aksi lain yang butuh penulis. */
   onLunas?: (sale: Sale) => Promise<HasilPiutang>;
+  /** Tandai lunas dengan uang diterima (input nominal). Kosong = blok
+   *  disembunyikan (pola yang sama dengan `onLunas`). */
+  onLunasDiterima?: (sale: Sale, uangDiterima: number, keDeposit: boolean) => Promise<HasilPiutang>;
+  /** Batalkan lunas (kembalikan ke Belum Lunas). Kosong = tombol
+   *  disembunyikan. Drawer tidak menulis sendiri — konfirmasi di halaman,
+   *  sama seperti pola `onHapus`. */
+  onBatalLunas?: (sale: Sale) => void;
   /** Ubah tag alamat customer. Kosong = tanpa aksi edit. Dipanggil hanya
    *  kalau tag berubah. */
   onUbahTag?: (namaCustomer: string, tag: string) => Promise<{ ok: boolean; pesan?: string }>;
@@ -158,6 +168,9 @@ export function StrukDrawer({
      kegagalan tidak menghilang bersama animasi yang berjalan sendiri. */
   const [lunasSedang, setLunasSedang] = useState(false);
   const [lunasPesan, setLunasPesan] = useState<{ ok: boolean; text: string } | null>(null);
+  const [uangDiterima, setUangDiterima] = useState<number>(0);
+  const [pembayaranBuka, setPembayaranBuka] = useState(false);
+  const [galatPembayaran, setGalatPembayaran] = useState<string | null>(null);
   /* Id baris yang sudah dibuang dari form lewat tombol hapus. Dikirim ke
      `ubahStruk` sebagai `hapusIds` supaya barisnya benar-benar dihapus dari
      `sale_items`, bukan hanya menghilang dari layar. */
@@ -210,6 +223,9 @@ export function StrukDrawer({
     setPilihBuka(false);
     setCariMenu("");
     setLunasPesan(null);
+    setUangDiterima(0);
+    setPembayaranBuka(false);
+    setGalatPembayaran(null);
     setHilang([]);
     setForm(formDariStruk(sale));
     setOngkir(sale.ongkir ?? 0);
@@ -220,6 +236,11 @@ export function StrukDrawer({
   const diskon = sale?.diskon ?? 0;
   const totalBaru = Math.max(0, subtotal + ongkir);
   const totalLama = sale?.total ?? 0;
+  const tagihanPembayaran = sale ? sale.total - (sale.usedDeposit ?? 0) : 0;
+  const langkahNominal =
+    tagihanPembayaran < 50_000 ? 10_000 : tagihanPembayaran <= 500_000 ? 50_000 : tagihanPembayaran <= 1_000_000 ? 100_000 : 500_000;
+  const nominalPertama = Math.ceil((tagihanPembayaran + 1) / langkahNominal) * langkahNominal;
+  const nominalCepat = [0, 1, 2, 3].map((i) => nominalPertama + i * langkahNominal);
 
   const ubahBaris = (i: number, patch: Partial<{ qty: number | ""; price: number; note: string }>) =>
     setForm((f) => ({
@@ -262,6 +283,37 @@ export function StrukDrawer({
     } finally {
       setLunasSedang(false);
     }
+  };
+
+  /* Tandai lunas dengan uang diterima. Hasil sukses kembali ke drawer;
+     kegagalan tetap di modal agar kasir bisa langsung memperbaiki nominal. */
+  const lunasDenganUang = async (keDeposit: boolean) => {
+    const tagihan = sale ? sale.total - (sale.usedDeposit ?? 0) : 0;
+    if (!sale || !onLunasDiterima || lunasSedang || uangDiterima < tagihan) return;
+    setGalatPembayaran(null);
+    setLunasSedang(true);
+    try {
+      const hasil = await onLunasDiterima(sale, uangDiterima, keDeposit);
+      if (hasil.ok) {
+        setLunasPesan({ ok: true, text: "Pembayaran dicatat — struk ini sekarang Lunas." });
+        setPembayaranBuka(false);
+        setUangDiterima(0);
+      } else {
+        setGalatPembayaran(hasil.pesan);
+      }
+    } catch (e) {
+      setGalatPembayaran(`Gagal mencatat pembayaran: ${(e as Error).message}`);
+    } finally {
+      setLunasSedang(false);
+    }
+  };
+
+  const bukaPembayaran = () => {
+    if (!sale) return;
+    setLunasPesan(null);
+    setGalatPembayaran(null);
+    setUangDiterima(sale.total - (sale.usedDeposit ?? 0));
+    setPembayaranBuka(true);
   };
 
   /* Item yang tidak tercatat saat transaksi dulu — pelanggan menambah satu
@@ -375,9 +427,13 @@ export function StrukDrawer({
 
 
   return (
+    <>
     <Drawer
         open={sale !== null}
-        onClose={onClose}
+        onClose={() => {
+          if (pembayaranBuka) setPembayaranBuka(false);
+          else onClose();
+        }}
         title="Detail Struk"
         subtitle={sale ? `${sale.receiptNo} · ${setelan.receiptWidth}mm` : undefined}
         width="sm:max-w-[480px]"
@@ -612,9 +668,12 @@ export function StrukDrawer({
                         <Line label="Diskon" value={rupiah(diskon)} />
                       )}
                       <Line label="Ongkir" value={rupiah(ongkir)} />
+                      {(sale.usedDeposit ?? 0) > 0 && (
+                        <Line label="Deposit terpakai" value={rupiah(-(sale.usedDeposit ?? 0))} />
+                      )}
                       <div className="flex items-center justify-between border-t border-border pt-1.5 text-base font-bold">
                         <dt>Total</dt>
-                        <dd className="figure">{rupiah(sale.total)}</dd>
+                        <dd className="figure">{rupiah(sale.total - (sale.usedDeposit ?? 0))}</dd>
                       </div>
                       <Line label="Dibayar dengan" value={sale.payment} />
                     </dl>
@@ -623,30 +682,79 @@ export function StrukDrawer({
                         Piutang dan mengetik nominalnya lagi. Sisa yang
                         tercatat dihitung server, bukan dari total di layar
                         — struk dengan cicilan sebagian tetap tertangani
-                        dengan benar. */}
-                    {onLunas && sale.status === "belum" && (
+                        dengan benar.
+
+                        Pembayaran uang tunai memakai modal agar nominal, kembalian,
+                        dan tujuan kembalian terlihat sebelum dicatat. */}
+                    {sale.status === "belum" && (
+                      <>
+                        {onLunasDiterima ? (
+                          <div className="mt-2 space-y-2">
+                            <button
+                              type="button"
+                              onClick={bukaPembayaran}
+                              disabled={sedangProses}
+                              className={btnPrimary + " min-h-11 w-full disabled:opacity-40"}
+                            >
+                              Tandai Lunas
+                            </button>
+                            {lunasPesan && (
+                              <p
+                                role="alert"
+                                className={
+                                  "mt-1.5 rounded-2xl px-3.5 py-2.5 text-xs font-medium " +
+                                  (lunasPesan.ok
+                                    ? "bg-primary/10 text-primary"
+                                    : "bg-destructive/10 text-destructive")
+                                }
+                              >
+                                {lunasPesan.text}
+                              </p>
+                            )}
+                          </div>
+                        ) : onLunas && (
+                          <div className="mt-2">
+                            <button
+                              type="button"
+                              onClick={() => void tandaiLunas()}
+                              disabled={lunasSedang || sedangProses}
+                              className={btnPrimary + " w-full disabled:opacity-40"}
+                            >
+                              {lunasSedang ? "Menyimpan…" : "Tandai Lunas"}
+                            </button>
+                            {lunasPesan && (
+                              <p
+                                role="alert"
+                                className={
+                                  "mt-1.5 rounded-2xl px-3.5 py-2.5 text-xs font-medium " +
+                                  (lunasPesan.ok
+                                    ? "bg-primary/10 text-primary"
+                                    : "bg-destructive/10 text-destructive")
+                                }
+                              >
+                                {lunasPesan.text}
+                              </p>
+                            )}
+                          </div>
+                        )}
+                      </>
+                    )}
+
+                    {/* Batalkan lunas — hanya untuk struk yang sudah Lunas.
+                        Konfirmasi dilakukan di halaman (pola `onHapus`). */}
+                    {sale.status === "lunas" && onBatalLunas && (
                       <div className="mt-2">
                         <button
                           type="button"
-                          onClick={() => void tandaiLunas()}
-                          disabled={lunasSedang || sedangProses}
-                          className={btnPrimary + " w-full disabled:opacity-40"}
+                          onClick={() => onBatalLunas(sale)}
+                          disabled={sedangProses}
+                          className={btnGhost + " w-full disabled:opacity-40"}
                         >
-                          {lunasSedang ? "Menyimpan…" : "Tandai Lunas"}
+                          Batalkan Lunas
                         </button>
-                        {lunasPesan && (
-                          <p
-                            role="alert"
-                            className={
-                              "mt-1.5 rounded-2xl px-3.5 py-2.5 text-xs font-medium " +
-                              (lunasPesan.ok
-                                ? "bg-primary/10 text-primary"
-                                : "bg-destructive/10 text-destructive")
-                            }
-                          >
-                            {lunasPesan.text}
-                          </p>
-                        )}
+                        <p className="mt-1 text-xs text-muted-foreground">
+                          Menghapus riwayat pembayaran &amp; mengembalikan deposit struk ini.
+                        </p>
                       </div>
                     )}
                   </section>
@@ -1013,6 +1121,7 @@ export function StrukDrawer({
                       /* Total ikut mengikuti form: kalau qty/harga diedit, yang
                          dicetak harus angkanya yang baru, bukan total lama. */
                       total: totalBaru,
+                      usedDeposit: sale.usedDeposit ?? 0,
                       items: form.lines.map((l) => ({
                         name: l.name,
                         variant: l.variant,
@@ -1029,7 +1138,113 @@ export function StrukDrawer({
             </AnimatePresence>
           </div>
         )}
-    </Drawer>
+      </Drawer>
+      <MotionConfig reducedMotion="user">
+        <Modal
+          open={pembayaranBuka && sale !== null}
+          onClose={() => {
+            if (!lunasSedang) setPembayaranBuka(false);
+          }}
+          title="Tandai Lunas"
+          subtitle={sale?.customer}
+          size="sm:max-w-md"
+          footer={
+            <div className="flex flex-col gap-2 sm:flex-row">
+              <button
+                type="button"
+                onClick={() => void lunasDenganUang(true)}
+                disabled={uangDiterima < tagihanPembayaran || lunasSedang || sedangProses}
+                className={btnPrimary + " min-h-11 w-full flex-1 whitespace-normal disabled:opacity-40"}
+              >
+                {lunasSedang ? "Menyimpan…" : "Kembalian ke deposit"}
+              </button>
+              <button
+                type="button"
+                onClick={() => void lunasDenganUang(false)}
+                disabled={uangDiterima < tagihanPembayaran || lunasSedang || sedangProses}
+                className={btnGhost + " min-h-11 w-full flex-1 whitespace-normal disabled:opacity-40"}
+              >
+                {lunasSedang ? "Menyimpan…" : "Kembalikan tunai"}
+              </button>
+            </div>
+          }
+        >
+          <div className="min-w-0 space-y-5 overflow-x-hidden">
+            <section aria-label="Ringkasan tagihan" className="rounded-2xl bg-accent/60 p-4">
+              <p className="text-xs font-bold uppercase tracking-wider text-muted-foreground">Tagihan</p>
+              <p className="mt-1 text-right text-3xl font-bold tracking-tight figure tabular-nums">
+                {formatRupiah(tagihanPembayaran)}
+              </p>
+            </section>
+
+            <section>
+              <p className="mb-2 text-xs font-semibold text-muted-foreground">Pilih nominal</p>
+              <div className="flex flex-wrap gap-2">
+                <button
+                  type="button"
+                  aria-pressed={uangDiterima === tagihanPembayaran}
+                  onClick={() => setUangDiterima(tagihanPembayaran)}
+                  className={
+                    "min-h-11 rounded-full border px-3.5 text-sm font-semibold transition-colors " +
+                    (uangDiterima === tagihanPembayaran
+                      ? "border-primary bg-primary/10 text-primary"
+                      : "border-input bg-card hover:border-ring")
+                  }
+                >
+                  Uang pas
+                </button>
+                {nominalCepat.map((nominal) => (
+                  <button
+                    key={nominal}
+                    type="button"
+                    aria-label={formatRupiah(nominal)}
+                    aria-pressed={uangDiterima === nominal}
+                    onClick={() => setUangDiterima(nominal)}
+                    className={
+                      "min-h-11 rounded-full border px-3.5 text-sm font-semibold figure transition-colors " +
+                      (uangDiterima === nominal
+                        ? "border-primary bg-primary/10 text-primary"
+                        : "border-input bg-card hover:border-ring")
+                    }
+                  >
+                    {formatRupiah(nominal)}
+                  </button>
+                ))}
+              </div>
+            </section>
+
+            <label className="block min-w-0">
+              <span className="mb-1.5 block text-xs font-semibold text-muted-foreground">Uang diterima</span>
+              <InputRupiah
+                aria-label="Uang diterima"
+                inputMode="numeric"
+                value={uangDiterima}
+                onChange={setUangDiterima}
+                className="h-12 px-3 text-base"
+              />
+            </label>
+
+            <div className="flex min-w-0 items-center justify-between gap-3 border-t border-border pt-3">
+              <span className="text-sm text-muted-foreground">Kembalian</span>
+              <strong
+                className={
+                  "shrink-0 text-right figure tabular-nums " +
+                  (uangDiterima > tagihanPembayaran ? "text-lg font-bold text-foreground" : "text-sm font-medium text-muted-foreground")
+                }
+              >
+                {formatRupiah(Math.max(0, uangDiterima - tagihanPembayaran))}
+              </strong>
+            </div>
+
+            {galatPembayaran && (
+              <p role="alert" className="rounded-2xl bg-destructive/10 px-3.5 py-2.5 text-sm font-medium text-destructive">
+                {galatPembayaran}
+              </p>
+            )}
+          </div>
+        </Modal>
+      </MotionConfig>
+    </>
   );
 }
 

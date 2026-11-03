@@ -52,6 +52,7 @@ const sale = (p: Partial<SaleRow> = {}): SaleRow => ({
   deleted_at: null,
   stock_restored_on_delete: 0,
   paid_amount: 100_000,
+  deposit_used: 0,
   created_at: "2026-09-30T07:00:00.000+00:00",
   queue_no: 1,
   queue_date: "2026-09-30",

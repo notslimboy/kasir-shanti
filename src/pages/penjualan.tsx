@@ -29,7 +29,7 @@ import { TeksPotong } from "@/components/ui/tooltip";
 import { KotCard } from "@/components/kot-card";
 import { buildKitchenOrderTicket } from "@/lib/kot";
 import { StrukDrawer } from "@/components/struk-drawer";
-import { lunasKanPiutang, type HasilPiutang } from "@/lib/piutang-tulis";
+import { batalkanLunasPiutang, lunasDenganUangDiterima, lunasKanPiutang, type HasilPiutang } from "@/lib/piutang-tulis";
 import { ChartBox } from "@/components/chart-box";
 import { ChartDonut } from "@/components/chart-donut";
 import { CHART_ANIM } from "@/components/chart-motion";
@@ -151,6 +151,7 @@ export function PenjualanPage() {
      tidak. Satu modal untuk dua tingkat kejadian yang berbeda itu cepat
      membuat kasir menekan tombol "Ya" tanpa membaca. */
   const [konfirmasiPermanen, setKonfirmasiPermanen] = useState<Sale | null>(null);
+  const [konfirmasiBatalLunas, setKonfirmasiBatalLunas] = useState<Sale | null>(null);
   const [customer, setCustomer] = useState("semua");
   const [strukAktif, setStrukAktif] = useState<Sale | null>(null);
   const [custom, setCustom] = useState<DateRange | null>(null);
@@ -490,6 +491,75 @@ export function PenjualanPage() {
       const pesan = `Gagal mencatat pelunasan: ${(e as Error).message}`;
       setCatatan({ tone: "warn", text: pesan });
       return { ok: false, pesan };
+    } finally {
+      setSedangProses(null);
+    }
+  };
+
+  /* Tandai lunas dengan uang diterima: kasir mengetik nominal, kelebihan
+     masuk deposit atau dikembalikan tunai. */
+  const lunasDenganUang = async (s: Sale, uangDiterima: number, keDeposit: boolean): Promise<HasilPiutang> => {
+    setSedangProses(s.id);
+    try {
+      const hasil = await lunasDenganUangDiterima(s.id, uangDiterima, keDeposit);
+      if (!hasil.ok) {
+        setCatatan({ tone: "warn", text: hasil.pesan });
+        return hasil;
+      }
+
+      setStrukAktif((prev) =>
+        prev && prev.id === s.id ? { ...prev, status: "lunas" } : prev,
+      );
+      await data.segarkanRentang(tgl(effectiveRange.from), tgl(effectiveRange.to));
+      const segar = (data.struk as Sale[]).find((x) => x.id === s.id);
+      if (segar && segar.status === "lunas") setStrukAktif(segar);
+
+      const kembalian = (hasil as any).kembalian ?? 0;
+      setCatatan({
+        tone: "ok",
+        text:
+          `${s.receiptNo} diterima Rp ${uangDiterima.toLocaleString("id-ID")}` +
+          `${kembalian > 0 ? ` — kembalian Rp ${kembalian.toLocaleString("id-ID")}` : ""}` +
+          `${hasil.deposit > 0 ? ` — deposit Rp ${hasil.deposit.toLocaleString("id-ID")}` : ""}.`,
+      });
+      return hasil;
+    } catch (e) {
+      const pesan = `Gagal mencatat pembayaran: ${(e as Error).message}`;
+      setCatatan({ tone: "warn", text: pesan });
+      return { ok: false, pesan };
+    } finally {
+      setSedangProses(null);
+    }
+  };
+
+  /* Batalkan lunas: buka konfirmasi. Penulisan dijalankan dari modal,
+     sama seperti pola `onHapus`. */
+  const batalLunasHandler = (s: Sale) => setKonfirmasiBatalLunas(s);
+
+  /* Jalankan pembatalan lunas setelah dikonfirmasi. */
+  const jalankanBatalLunas = async (s: Sale) => {
+    setSedangProses(s.id);
+    try {
+      const hasil = await batalkanLunasPiutang(s.id);
+      if (!hasil.ok) {
+        setCatatan({ tone: "warn", text: hasil.pesan });
+        return;
+      }
+
+      setStrukAktif((prev) =>
+        prev && prev.id === s.id ? { ...prev, status: "belum" } : prev,
+      );
+      await data.segarkanRentang(tgl(effectiveRange.from), tgl(effectiveRange.to));
+      const segar = (data.struk as Sale[]).find((x) => x.id === s.id);
+      if (segar) setStrukAktif(segar);
+      setKonfirmasiBatalLunas(null);
+
+      setCatatan({
+        tone: "ok",
+        text: `${s.receiptNo} dikembalikan ke Belum Lunas.`,
+      });
+    } catch (e) {
+      setCatatan({ tone: "warn", text: `Gagal membatalkan pelunasan: ${(e as Error).message}` });
     } finally {
       setSedangProses(null);
     }
@@ -1298,6 +1368,8 @@ export function PenjualanPage() {
         onHapusPermanen={(s) => setKonfirmasiPermanen(s)}
         onSimpan={simpanUbah}
         onLunas={tandaiLunas}
+        onLunasDiterima={lunasDenganUang}
+        onBatalLunas={batalLunasHandler}
         onUbahTag={ubahTagStruk}
         /* Katalog menu dimuat saat diminta, bukan saat halaman dibuka:
            Penjualan tidak butuh 1.095 produk untuk menampilkan tabel struk,
@@ -1382,6 +1454,38 @@ export function PenjualanPage() {
         <p className="mt-2 text-sm font-semibold text-destructive">
           Tidak bisa dikembalikan, tidak ada backup di aplikasi ini. Kalau struk ini ternyata
           masih dibutuhkan, tekan Batal dan biarkan di tab Terhapus.
+        </p>
+      </Modal>
+
+      {/* Konfirmasi batalkan lunas.
+          Tidak bisa dibalik dari sini — harus通过 Tandai Lunas lagi. */}
+      <Modal
+        open={konfirmasiBatalLunas !== null}
+        onClose={() => setKonfirmasiBatalLunas(null)}
+        title="Batalkan lunas?"
+        subtitle={
+          konfirmasiBatalLunas
+            ? `${konfirmasiBatalLunas.receiptNo} · ${konfirmasiBatalLunas.customer} · ${rupiah(konfirmasiBatalLunas.total)}`
+            : undefined
+        }
+        footer={
+          <div className="flex gap-2">
+            <button onClick={() => setKonfirmasiBatalLunas(null)} className={btnGhost + " flex-1"}>
+              Batal
+            </button>
+            <button
+              onClick={() => konfirmasiBatalLunas && void jalankanBatalLunas(konfirmasiBatalLunas)}
+              disabled={sedangProses === konfirmasiBatalLunas?.id}
+              className="h-11 flex-1 rounded-full bg-warning font-semibold text-white transition-opacity disabled:opacity-50"
+            >
+              {sedangProses === konfirmasiBatalLunas?.id ? "Memproses..." : "Ya, batalkan lunas"}
+            </button>
+          </div>
+        }
+      >
+        <p className="text-sm text-muted-foreground">
+          Riwayat pembayaran struk ini akan dihapus dan deposit dikembalikan.
+          Status struk kembali menjadi <strong className="text-foreground">Belum Lunas</strong>.
         </p>
       </Modal>
 
