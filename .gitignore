@@ -17,6 +17,7 @@ src/**/*.js.map
 # di public/thermal/ — tanpa baris ini keduanya tidak pernah ikut repo, dan
 # struk yang sudah dicetak jadi punya logo, sementara yang di-server tidak.
 !public/**/*.png
+!src/assets/logo-shanti-catering.png
 
 # Artefak Playwright — trace kegagalan berisi snapshot seluruh DOM,
 # termasuk data yang tampil di layar. Jangan masuk repo.

@@ -43,6 +43,7 @@ type IkonNama =
   | "receipt"
   | "users"
   | "wallet"
+  | "file"
   | "chart"
   | "truck"
   | "banknote"
@@ -66,6 +67,7 @@ const NAV: readonly NavItem[] = [
   { id: "struk", label: "Struk", icon: "receipt" },
   { id: "customer", label: "Customer", icon: "users" },
   { id: "piutang", label: "Piutang", icon: "wallet" },
+  { id: "invoice-nota", label: "Invoice & Nota", icon: "file" },
   /* Seksi ITS Food — tiga menu tetap tampil di mobile untuk cek pesanan. */
   { id: "itsfood-dash", label: "Dasbor", tip: "Dasbor", icon: "chart" },
   { id: "itsfood-orders", label: "Order", tip: "Order", icon: "truck" },
@@ -83,6 +85,7 @@ function Icon({ name }: { name: IkonNama }) {
     receipt: "M6 3h12v18l-2-1.5-2 1.5-2-1.5-2 1.5L6 21V3ZM9 8h6M9 12h6",
     users: "M8 11a3 3 0 1 0 0-6 3 3 0 0 0 0 6ZM3 20a5 5 0 0 1 10 0M16 11a3 3 0 1 0 0-6M15 15.5a5 5 0 0 1 6 4.5",
     wallet: "M3 7h15a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7Zm0 0 3-3h10M17 13h.01",
+    file: "M6 3h8l4 4v14H6zM14 3v5h5M9 12h6M9 16h6",
     chart: "M4 20V10M10 20V4M16 20v-7M22 20H2",
     truck: "M3 7h11v9H3zM14 11h3.6l2.9 3v2H14zM7.5 19a1.5 1.5 0 1 0 0-3 1.5 1.5 0 0 0 0 3ZM17.5 19a1.5 1.5 0 1 0 0-3 1.5 1.5 0 0 0 0 3Z",
     banknote: "M3 6h18v12H3zM12 9a3 3 0 1 0 0 6 3 3 0 0 0 0-6ZM6 9h.01M18 15h.01",

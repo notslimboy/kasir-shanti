@@ -17,6 +17,7 @@ import { Beranda } from "@/pages/beranda";
 import { KasirPage } from "@/pages/kasir";
 import { PenjualanPage } from "@/pages/penjualan";
 import { PiutangPage } from "@/pages/piutang";
+import { InvoiceNotaPage } from "@/pages/invoice-nota";
 import { CustomerPage } from "@/pages/customer";
 import { PengaturanPage } from "@/pages/pengaturan";
 import { MenuPage } from "@/pages/menu";
@@ -43,6 +44,7 @@ const NAV_TO_ROUTE: Record<string, string> = {
   struk: "/penjualan",
   customer: "/customer",
   piutang: "/piutang",
+  "invoice-nota": "/invoice-nota",
   "itsfood-dash": "/itsfood-dashboard",
   "itsfood-orders": "/itsfood-orders",
   "itsfood-pay": "/itsfood-tagihan",
@@ -209,6 +211,7 @@ function AppShell() {
                 <Route path="/menu" element={<MenuPage />} />
                 <Route path="/penjualan" element={<PenjualanPage />} />
                 <Route path="/piutang" element={<PiutangPage />} />
+                <Route path="/invoice-nota" element={<InvoiceNotaPage />} />
                 <Route path="/customer" element={<CustomerPage />} />
                 <Route path="/itsfood-dashboard" element={<ItsfoodDashboardPage />} />
                 <Route path="/itsfood-orders" element={<ItsfoodPage />} />

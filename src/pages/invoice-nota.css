@@ -1,0 +1,106 @@
+/* App-shell and controls follow Shanti tokens; paper styles below mirror the original microsite. */
+.invoice-nota-page { min-width: 0; }
+.invoice-customer-input input { height: 44px; border-color: var(--input); background: var(--card); padding-inline: 14px; font-size: 14px; outline: none; }
+.invoice-customer-input input:focus-visible { border-color: var(--ring); box-shadow: 0 0 0 3px color-mix(in srgb, var(--ring) 24%, transparent); }
+.invoice-preview-scroll { height: min(70dvh, 720px); min-height: 280px; max-width: 100%; overflow: auto; overscroll-behavior: contain; border-radius: 16px; background: var(--muted); padding: 12px; }
+/* Nota portrait: tampilkan dokumen penuh ke bawah, dan biarkan area preview
+   merebut sisa tinggi card supaya sejajar dengan card form di sebelahnya. */
+.invoice-preview-scroll.nota-mode { height: auto; max-height: none; flex: 1 1 auto; min-height: 280px; }
+.invoice-preview-stage { position: relative; margin: 0 auto; }
+.invoice-preview-scale { position: absolute; top: 0; left: 0; transform-origin: top left; }
+.export-frame { width: fit-content; background: #fff; padding: 32px; }
+
+.document-paper {
+  margin: 0 auto;
+  display: flex;
+  flex-direction: column;
+  border: 2px solid #123322;
+  background: #fff;
+  color: #123322;
+  box-shadow: none;
+  font-family: Arial, Helvetica, sans-serif;
+}
+.nota-paper { width: 760px; min-height: 1080px; padding: 54px 48px; }
+.invoice-paper { width: 1120px; min-height: 760px; padding: 46px 52px; }
+
+.logo-block { display: flex; flex-direction: column; align-items: flex-start; }
+.logo-block > img { width: 320px; height: 144px; object-fit: contain; object-position: left; }
+.logo-block.compact > img { width: 224px; height: 80px; }
+.logo-contacts { display: flex; flex-direction: column; align-items: flex-start; gap: 6px; margin-top: 20px; }
+.logo-block.compact .logo-contacts { margin-top: 12px; }
+.document-contact-pill { display: inline-flex; align-items: center; gap: 8px; border: 2px solid #17261c; border-radius: 999px; background: #fff; padding: 6px 12px; color: #17261c; font-size: 14px; }
+.document-contact-pill.compact { gap: 6px; padding: 4px 10px; font-size: 11px; }
+.document-contact-pill > span { display: grid; width: 28px; height: 28px; flex: 0 0 auto; place-items: center; border: 2px solid #17261c; border-radius: 50%; }
+.document-contact-pill.compact > span { width: 20px; height: 20px; }
+.document-contact-pill b { font-weight: 700; line-height: 1; }
+
+.nota-header { display: grid; grid-template-columns: minmax(0, 1fr) 280px; gap: 32px; }
+.nota-right { text-align: right; }
+.service-info { margin: 0; color: #123322; font-size: 15px; font-weight: 600; line-height: 24px; }
+.nota-fields { display: flex; flex-direction: column; gap: 16px; margin-top: 32px; text-align: left; }
+.document-line { display: grid; grid-template-columns: 100px minmax(0, 1fr); gap: 12px; align-items: end; font-size: 15px; }
+.document-line > span:first-child { color: #0b2416; font-weight: 600; }
+.document-line > span:last-child { min-width: 0; min-height: 32px; border-bottom: 2px solid #123322; padding: 0 8px 4px; color: #123322; overflow-wrap: anywhere; }
+.document-line > span:last-child.strong { font-weight: 900; }
+.document-line.multiline { align-items: start; }
+.document-line.multiline > span:last-child { min-height: 32px; white-space: normal; overflow-wrap: anywhere; line-height: 24px; }
+.document-line:not(.multiline) > span:last-child { white-space: nowrap; }
+
+.nota-table, .invoice-table { width: 100%; border-collapse: collapse; }
+.nota-table { margin-top: 40px; }
+.nota-table th { background: #123322; color: #fff; font-size: 12px; letter-spacing: .08em; }
+.nota-table th, .nota-table td { height: 52px; border: 2px solid #123322; padding: 8px 10px; text-align: center; }
+.nota-table th:first-child { width: 110px; }
+.nota-table th:nth-child(3) { width: 160px; }
+.nota-table th:nth-child(4) { width: 150px; }
+.nota-table td { font-size: 18px; font-weight: 500; font-variant-numeric: tabular-nums; }
+.nota-table td.text-left { text-align: left; }
+.nota-table .total-row td { height: 58px; font-size: 18px; font-weight: 900; text-align: right; }
+.nota-table .total-row td:last-child { text-align: center; }
+.nota-signature { margin-top: auto; padding-top: 48px; }
+.nota-signature p { margin: 0; color: #0b2416; font-size: 20px; font-weight: 900; }
+.nota-signature span { display: block; width: 176px; height: 1px; margin-top: 80px; background: #123322; }
+
+.invoice-header { display: flex; align-items: flex-start; justify-content: space-between; gap: 40px; }
+.invoice-title { color: #005d2e; text-align: right; }
+.invoice-title p { margin: 0; font-size: 54px; font-weight: 900; letter-spacing: -.04em; line-height: 1.05; }
+.invoice-title span { display: block; margin-top: 8px; color: #315c3d; font-size: 15px; font-weight: 600; }
+.invoice-info { display: grid; grid-template-columns: minmax(0, 1fr) 340px; gap: 32px; margin-top: 40px; }
+.bill-to, .invoice-meta-box { border: 1px solid #a6dba0; border-radius: 16px; padding: 20px; }
+.bill-to { background: #f6fbf5; }
+.bill-to > p { margin: 0; color: #238d48; font-size: 13px; font-weight: 700; letter-spacing: .14em; text-transform: uppercase; }
+.bill-to > strong { display: block; margin-top: 12px; color: #0b2416; font-size: 24px; font-weight: 900; }
+.bill-to > div { max-width: 576px; margin-top: 16px; color: #315c3d; font-size: 15px; line-height: 24px; }
+.invoice-meta-box { display: flex; flex-direction: column; gap: 12px; }
+.invoice-meta-row { display: flex; align-items: center; justify-content: space-between; gap: 16px; border-bottom: 1px solid #c9e9c3; padding-bottom: 12px; }
+.invoice-meta-row:last-child { border-bottom: 0; padding-bottom: 0; }
+.invoice-meta-row > span:first-child { color: #4e7258; font-size: 13px; font-weight: 600; }
+.invoice-meta-row > span:last-child { color: #123322; font-size: 15px; text-align: right; font-variant-numeric: tabular-nums; }
+.invoice-meta-row > span:last-child.strong { color: #005d2e; font-weight: 900; }
+
+.invoice-table { margin-top: 32px; }
+.invoice-table th { border-bottom: 2px solid #005d2e; color: #005d2e; font-size: 12px; letter-spacing: .12em; text-align: left; text-transform: uppercase; }
+.invoice-table th, .invoice-table td { padding: 14px 12px; }
+.invoice-table th:nth-child(2) { width: 110px; }
+.invoice-table th:nth-child(3), .invoice-table th:nth-child(4) { width: 180px; }
+.invoice-table td { border-bottom: 1px solid #c9e9c3; color: #123322; font-size: 15px; font-variant-numeric: tabular-nums; }
+.invoice-table th:not(:first-child), .invoice-table td:not(:first-child) { text-align: right; }
+.invoice-bottom { display: grid; grid-template-columns: minmax(0, 1fr) 320px; gap: 32px; margin-top: auto; padding-top: 32px; }
+.payment-info, .invoice-total-card { border-radius: 16px; padding: 20px; }
+.payment-info { background: #f6fbf5; }
+.payment-info > p { margin: 0; color: #238d48; font-size: 13px; font-weight: 700; letter-spacing: .14em; text-transform: uppercase; }
+.payment-info > div { margin-top: 12px; color: #315c3d; font-size: 15px; line-height: 24px; }
+.invoice-total-card { background: #005d2e; color: #fff; }
+.invoice-total-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; border-bottom: 1px solid rgba(255,255,255,.2); padding-bottom: 12px; color: #fff; font-size: 15px; font-variant-numeric: tabular-nums; }
+.invoice-total-row + .invoice-total-row { padding-top: 12px; }
+.invoice-total-final { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding-top: 16px; color: #fff; font-size: 24px; font-weight: 900; font-variant-numeric: tabular-nums; }
+.invoice-total-final > span:last-child { text-align: right; }
+
+@media (max-width: 767px) {
+  .invoice-preview-scroll { height: min(68dvh, 620px); min-height: 240px; padding: 10px; }
+  .nota-paper { width: 700px; }
+  .invoice-paper { width: 1040px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .invoice-nota-page *, .invoice-nota-page *::before, .invoice-nota-page *::after { scroll-behavior: auto !important; transition-duration: .001ms !important; animation-duration: .001ms !important; animation-iteration-count: 1 !important; }
+}
