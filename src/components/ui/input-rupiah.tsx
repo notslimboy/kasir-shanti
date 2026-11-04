@@ -30,6 +30,9 @@ export type InputRupiahProps = Omit<
   /** Tampilkan "Rp" di dalam kotak. Default tidak — labelnya sudah menyebut
       nominal, jadi "Rp" hanya makan ruang. */
   prefix?: string;
+  /** Perataan teks. Default "right" (panel nominal di kasir). Form edit
+      customer pakai "left" supaya sejajar dengan field teks lainnya. */
+  align?: "left" | "right";
 };
 
 /** Jumlah karakter non-digit sebelum posisi kursor. Dipakai sebagai "nomor
@@ -48,7 +51,7 @@ function posisiDariDigit(s: string, n: number): number {
   return s.length;
 }
 
-export function InputRupiah({ value, onChange, prefix = "", className = "", ...rest }: InputRupiahProps) {
+export function InputRupiah({ value, onChange, prefix = "", align = "right", className = "", ...rest }: InputRupiahProps) {
   const [teks, setTeks] = useState(() => formatRibuan(value));
   const el = useRef<HTMLInputElement>(null);
   /* Digit ke- berapa kursor berada, atau null kalau tidak sedang mengetik. */
@@ -101,7 +104,8 @@ export function InputRupiah({ value, onChange, prefix = "", className = "", ...r
           onChange(angka);
         }}
         className={
-          "w-full rounded-xl border border-input bg-card text-right text-base lg:text-sm figure outline-none focus:border-ring " +
+          "w-full rounded-xl border border-input bg-card text-base lg:text-sm figure outline-none focus:border-ring " +
+          (align === "left" ? "text-left " : "text-right ") +
           (prefix ? "pl-8 " : "") +
           className
         }

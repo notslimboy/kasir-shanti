@@ -1,8 +1,9 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { AnimatePresence, motion } from "motion/react";
 
 import { Card, Pill } from "@/components/ui/card";
 import { Drawer } from "@/components/ui/drawer";
+import { SheetBawah } from "@/components/ui/sheet-bawah";
 import { Select } from "@/components/ui/select";
 import {
   Field,
@@ -17,6 +18,7 @@ import type { Customer } from "@/lib/page-data";
 import { idNumerikCustomer } from "@/lib/page-data";
 import { useData } from "@/lib/data-source";
 import { rupiahShort } from "@/lib/format";
+import { InputRupiah } from "@/components/ui/input-rupiah";
 import { SortableTh, urutkan, useUrutan } from "@/components/ui/sortable-table";
 import { tanggalPendekKeWaktu } from "@/lib/tanggal-pendek";
 import { ubahCustomer } from "@/lib/supabase-tulis";
@@ -96,6 +98,19 @@ export function CustomerPage() {
      "Tersimpan" hanya boleh tampil setelah server mengonfirmasi. */
   const [menyimpan, setMenyimpan] = useState(false);
   const [galatSimpan, setGalatSimpan] = useState<GalatTulis | null>(null);
+
+  /* Mobile SML & tablet: form edit customer tampil sebagai bottom sheet
+     (SheetBawah), desktop tetap Drawer kanan. Pola sama dengan menu.tsx. */
+  const [isMobile, setIsMobile] = useState(false);
+  useEffect(() => {
+    /* Guard matchMedia: lingkungan uji (jsdom) tidak punya media query. */
+    if (typeof window.matchMedia !== "function") return;
+    const media = window.matchMedia("(max-width: 1279px)");
+    const update = () => setIsMobile(media.matches);
+    update();
+    media.addEventListener("change", update);
+    return () => media.removeEventListener("change", update);
+  }, []);
 
   const cocokTag = (c: Customer) =>
     tag === "semua" || (tag === "__tanpa" ? !c.tag : c.tag === tag);
@@ -227,12 +242,146 @@ export function CustomerPage() {
             : c,
         ),
     );
+    /* Refresh shared customers supaya Kasir/Import lihat saldo baru. Gagal
+       tidak menggagalkan simpan — cache basi akan termuat ulang nanti. */
+    live.perbaruiSetelahTulis().catch(() => {});
     setTersimpan(true);
     setTimeout(() => {
       setTersimpan(false);
       tutup();
     }, 620);
   };
+
+  /* Footer form — dibagi oleh Drawer (desktop) dan SheetBawah (mobile/tablet),
+     jadi cukup satu definisi. */
+  const footerForm = (
+    <div className="space-y-2">
+      {/* Error tidak pernah disembunyikan di balik "Tersimpan".
+          Kegagalan menulis harus kelihatan selama drawenya masih
+          terbuka — kalau tidak, kasir menekan Simpan, melihat
+         daftar berubah, lalu reload dan menemukan semua hilang. */}
+      {/* Error ditampilkan berjenjang, bukan sebagai satu blok merah.
+          Yang dibaca kasir cuma judulnya: "Nama itu sudah dipakai".
+          Penjelasan dan langkah menyusul, dan detail Postgres yang
+          tidak berarti apa-apa bagi kasir disimpan di paling bawah
+          dengan huruf kecil — tetap ada untuk developer,
+          tapi tidak memenuhi layar. */}
+      {galatSimpan && (
+        <div
+          role="alert"
+          className="rounded-2xl bg-destructive/10 px-3.5 py-3 text-destructive"
+        >
+          <p className="text-sm font-bold">{galatSimpan.judul}</p>
+          <p className="mt-1 text-xs">{galatSimpan.penjelasan}</p>
+          <p className="mt-1.5 text-xs font-semibold">{galatSimpan.langkah}</p>
+          {galatSimpan.teknis && (
+            <p className="mt-2 break-words font-mono text-[10px] opacity-70">
+              {galatSimpan.teknis}
+            </p>
+          )}
+        </div>
+      )}
+      <div className="flex items-center gap-2">
+        <AnimatePresence mode="wait" initial={false}>
+          {tersimpan ? (
+            <motion.span
+              key="ok"
+              initial={{ opacity: 0, scale: 0.7 }}
+              animate={{ opacity: 1, scale: 1 }}
+              exit={{ opacity: 0, scale: 0.7 }}
+              transition={{ type: "spring", stiffness: 500, damping: 22 }}
+              className="inline-flex h-11 items-center gap-1.5 rounded-full bg-primary px-3.5 text-xs font-bold text-primary-foreground"
+            >
+              ✓ Tersimpan
+            </motion.span>
+          ) : menyimpan ? (
+            <motion.span
+              key="jalan"
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              className="inline-flex h-11 items-center gap-1.5 px-1 text-xs font-semibold text-muted-foreground"
+            >
+              Menyimpan…
+            </motion.span>
+          ) : null}
+        </AnimatePresence>
+        <button
+          onClick={tutup}
+          disabled={tersimpan || menyimpan}
+          className={btnGhost + " disabled:opacity-40"}
+        >
+          Batal
+        </button>
+        <motion.button
+          onClick={simpan}
+          disabled={tersimpan || menyimpan}
+          whileTap={{ scale: 0.96 }}
+          className={btnPrimary + " disabled:opacity-40"}
+        >
+          Simpan
+        </motion.button>
+      </div>
+    </div>
+  );
+
+  /* Isi form — sama untuk kedua panel. */
+  const isiForm =
+    draft && (
+      <div className="space-y-3">
+        <Field label="Nama Customer">
+          <input
+            value={draft.name}
+            onChange={(e) => setDraft({ ...draft, name: e.target.value })}
+            className={inputClass}
+          />
+        </Field>
+        <div className="grid gap-3 sm:grid-cols-2">
+          <Field label="Area / Franchise" hint="Dipakai untuk mengelompokkan, bukan kategori">
+            <Select
+              value={draft.tag}
+              onChange={(tag) => setDraft({ ...draft, tag })}
+              options={[...opsiTagSrc, { value: TANPA_TAG, label: TANPA_TAG }]}
+            />
+          </Field>
+          <Field label="Ongkir Default" hint="terisi otomatis di Kasir">
+            <input
+              type="number"
+              value={draft.ongkir || ""}
+              onChange={(e) => setDraft({ ...draft, ongkir: Number(e.target.value) || 0 })}
+              className={inputClass + " figure"}
+            />
+          </Field>
+        </div>
+        <Field label="Deposit" hint="Potongan pembayaran di muka">
+          <InputRupiah
+            aria-label="Deposit"
+            align="left"
+            value={draft.deposit}
+            onChange={(n) => setDraft({ ...draft, deposit: n })}
+            className="h-11"
+          />
+        </Field>
+
+        {/* Tabel customers hanya punya 8 kolom: id, name,
+            default_shipping, last_order_at, created_at, updated_at,
+            deposit_balance, tag. Tidak ada kolom alamat maupun catatan —
+            jadi field-nya tidak ditampilkan. Menampilkannya berarti
+            kasir mengetik sesuatu yang nowhere-to-go. */}
+        {live.status === "live" && (
+          <p className="rounded-2xl bg-muted px-3.5 py-2.5 text-xs text-muted-foreground">
+            Supabase belum punya kolom alamat dan catatan untuk customer.
+            Alamat tersimpan di tiap struk, jadi ubah dari menu Penjualan
+            bila perlu.
+          </p>
+        )}
+
+        <p className="rounded-2xl bg-muted px-3.5 py-2.5 text-xs text-muted-foreground">
+          Riwayat order tidak bisa diubah dari sini — hapus struknya di menu Penjualan kalau
+          ada yang keliru.
+        </p>
+      </div>
+    );
 
   return (
     <div>
@@ -451,137 +600,27 @@ export function CustomerPage() {
         </ul>
       </Card>
 
-      <Drawer
-        open={draft !== null}
-        onClose={tutup}
-        title="Ubah Data Customer"
-        subtitle={draft?.name}
-        footer={
-          <div className="space-y-2">
-            {/* Error tidak pernah disembunyikan di balik "Tersimpan".
-                Kegagalan menulis harus kelihatan selama drawenya masih
-                terbuka — kalau tidak, kasir menekan Simpan, melihat
-               daftar berubah, lalu reload dan menemukan semua hilang. */}
-            {/* Error ditampilkan berjenjang, bukan sebagai satu blok merah.
-                Yang dibaca kasir cuma judulnya: "Nama itu sudah dipakai".
-                Penjelasan dan langkah menyusul, dan detail Postgres yang
-                tidak berarti apa-apa bagi kasir disimpan di paling bawah
-                dengan huruf kecil — tetap ada untuk developer,
-                tapi tidak memenuhi layar. */}
-            {galatSimpan && (
-              <div
-                role="alert"
-                className="rounded-2xl bg-destructive/10 px-3.5 py-3 text-destructive"
-              >
-                <p className="text-sm font-bold">{galatSimpan.judul}</p>
-                <p className="mt-1 text-xs">{galatSimpan.penjelasan}</p>
-                <p className="mt-1.5 text-xs font-semibold">{galatSimpan.langkah}</p>
-                {galatSimpan.teknis && (
-                  <p className="mt-2 break-words font-mono text-[10px] opacity-70">
-                    {galatSimpan.teknis}
-                  </p>
-                )}
-              </div>
-            )}
-            <div className="flex items-center gap-2">
-              <AnimatePresence mode="wait" initial={false}>
-                {tersimpan ? (
-                  <motion.span
-                    key="ok"
-                    initial={{ opacity: 0, scale: 0.7 }}
-                    animate={{ opacity: 1, scale: 1 }}
-                    exit={{ opacity: 0, scale: 0.7 }}
-                    transition={{ type: "spring", stiffness: 500, damping: 22 }}
-                    className="inline-flex h-11 items-center gap-1.5 rounded-full bg-primary px-3.5 text-xs font-bold text-primary-foreground"
-                  >
-                    ✓ Tersimpan
-                  </motion.span>
-                ) : menyimpan ? (
-                  <motion.span
-                    key="jalan"
-                    initial={{ opacity: 0 }}
-                    animate={{ opacity: 1 }}
-                    exit={{ opacity: 0 }}
-                    className="inline-flex h-11 items-center gap-1.5 px-1 text-xs font-semibold text-muted-foreground"
-                  >
-                    Menyimpan…
-                  </motion.span>
-                ) : null}
-              </AnimatePresence>
-              <button
-                onClick={tutup}
-                disabled={tersimpan || menyimpan}
-                className={btnGhost + " disabled:opacity-40"}
-              >
-                Batal
-              </button>
-              <motion.button
-                onClick={simpan}
-                disabled={tersimpan || menyimpan}
-                whileTap={{ scale: 0.96 }}
-                className={btnPrimary + " disabled:opacity-40"}
-              >
-                Simpan
-              </motion.button>
-            </div>
-          </div>
-        }
-      >
-        {draft && (
-          <div className="space-y-3">
-            <Field label="Nama Customer">
-              <input
-                value={draft.name}
-                onChange={(e) => setDraft({ ...draft, name: e.target.value })}
-                className={inputClass}
-              />
-            </Field>
-            <div className="grid gap-3 sm:grid-cols-2">
-              <Field label="Area / Franchise" hint="Dipakai untuk mengelompokkan, bukan kategori">
-                <Select
-                  value={draft.tag}
-                  onChange={(tag) => setDraft({ ...draft, tag })}
-                  options={[...opsiTagSrc, { value: TANPA_TAG, label: TANPA_TAG }]}
-                />
-              </Field>
-              <Field label="Ongkir Default" hint="terisi otomatis di Kasir">
-                <input
-                  type="number"
-                  value={draft.ongkir || ""}
-                  onChange={(e) => setDraft({ ...draft, ongkir: Number(e.target.value) || 0 })}
-                  className={inputClass + " figure"}
-                />
-              </Field>
-            </div>
-            <Field label="Deposit" hint="Potongan pembayaran di muka">
-              <input
-                type="number"
-                value={draft.deposit || ""}
-                onChange={(e) => setDraft({ ...draft, deposit: Number(e.target.value) || 0 })}
-                className={inputClass + " figure"}
-              />
-            </Field>
-
-            {/* Tabel customers hanya punya 8 kolom: id, name,
-                default_shipping, last_order_at, created_at, updated_at,
-                deposit_balance, tag. Tidak ada kolom alamat maupun catatan —
-                jadi field-nya tidak ditampilkan. Menampilkannya berarti
-                kasir mengetik sesuatu yang nowhere-to-go. */}
-            {live.status === "live" && (
-              <p className="rounded-2xl bg-muted px-3.5 py-2.5 text-xs text-muted-foreground">
-                Supabase belum punya kolom alamat dan catatan untuk customer.
-                Alamat tersimpan di tiap struk, jadi ubah dari menu Penjualan
-                bila perlu.
-              </p>
-            )}
-
-            <p className="rounded-2xl bg-muted px-3.5 py-2.5 text-xs text-muted-foreground">
-              Riwayat order tidak bisa diubah dari sini — hapus struknya di menu Penjualan kalau
-              ada yang keliru.
-            </p>
-          </div>
-        )}
-      </Drawer>
+      {isMobile ? (
+        <SheetBawah
+          open={draft !== null}
+          onClose={tutup}
+          title="Ubah Data Customer"
+          subtitle={draft?.name}
+          footer={footerForm}
+        >
+          {isiForm}
+        </SheetBawah>
+      ) : (
+        <Drawer
+          open={draft !== null}
+          onClose={tutup}
+          title="Ubah Data Customer"
+          subtitle={draft?.name}
+          footer={footerForm}
+        >
+          {isiForm}
+        </Drawer>
+      )}
     </div>
   );
 }

@@ -1,7 +1,8 @@
-import { useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { AnimatePresence, MotionConfig, motion } from "motion/react";
 
 import { Drawer } from "@/components/ui/drawer";
+import { SheetBawah } from "@/components/ui/sheet-bawah";
 import { Modal } from "@/components/ui/modal";
 import { Struk, type StrukHandle } from "@/components/struk";
 import { Pill } from "@/components/ui/card";
@@ -99,6 +100,25 @@ function barisDibuang(lines: BarisForm[]): BarisForm[] {
   return lines.filter((l) => (Number(l.qty) || 0) <= 0);
 }
 
+/* Panel yang ikut bentuk layar: bottom sheet (SheetBawah) di mobile & tablet,
+   panel kanan (Drawer) di desktop — pola sama dengan menu.tsx dan
+   customer.tsx. `width` hanya milik Drawer (lebar panel), `maxH` hanya
+   milik SheetBawah (batas tinggi). */
+function Panel({
+  isMobile,
+  maxH,
+  width,
+  ...rest
+}: { isMobile: boolean } & React.ComponentProps<typeof SheetBawah> & {
+    width?: string;
+  }) {
+  return isMobile ? (
+    <SheetBawah maxH={maxH} {...rest} />
+  ) : (
+    <Drawer width={width} {...rest} />
+  );
+}
+
 export function StrukDrawer({
   sale,
   onClose,
@@ -189,6 +209,20 @@ export function StrukDrawer({
   /* Pemilih menu untuk baris baru. Ditutup setiap kali drawer pindah struk,
      supaya daftar pilihan tidak menyambung dari struk sebelumnya. */
   const [pilihBuka, setPilihBuka] = useState(false);
+
+  /* Mobile SML & tablet: "Detail Struk" tampil sebagai bottom sheet
+     (Panel → SheetBawah), desktop tetap panel kanan. Pola sama dengan
+     menu.tsx dan customer.tsx. */
+  const [isMobile, setIsMobile] = useState(false);
+  useEffect(() => {
+    /* Guard matchMedia: lingkungan uji (jsdom) tidak punya media query. */
+    if (typeof window.matchMedia !== "function") return;
+    const media = window.matchMedia("(max-width: 1279px)");
+    const update = () => setIsMobile(media.matches);
+    update();
+    media.addEventListener("change", update);
+    return () => media.removeEventListener("change", update);
+  }, []);
   const [cariMenu, setCariMenu] = useState("");
 
   /* Opsi dibangun dari katalog yang sudah dimuat; kosong selama katalog
@@ -428,7 +462,8 @@ export function StrukDrawer({
 
   return (
     <>
-    <Drawer
+    <Panel
+        isMobile={isMobile}
         open={sale !== null}
         onClose={() => {
           if (pembayaranBuka) setPembayaranBuka(false);
@@ -1031,11 +1066,23 @@ export function StrukDrawer({
                           type="button"
                           onClick={bukaPilihItem}
                           className={
-                            "w-full rounded-2xl border border-dashed border-input py-2 text-xs font-semibold " +
+                            "flex min-h-11 w-full items-center justify-center gap-2 rounded-2xl " +
+                            "border border-dashed border-input px-3 py-2 text-sm font-semibold " +
                             "text-muted-foreground transition-colors active:border-ring active:text-foreground"
                           }
                         >
-                          + Tambah item
+                          <svg
+                            viewBox="0 0 24 24"
+                            fill="none"
+                            stroke="currentColor"
+                            strokeWidth={2.25}
+                            strokeLinecap="round"
+                            className="h-5 w-5 shrink-0"
+                            aria-hidden="true"
+                          >
+                            <path d="M12 5v14M5 12h14" />
+                          </svg>
+                          <span>Tambah item</span>
                         </button>
                       )}
                     </div>
@@ -1138,7 +1185,7 @@ export function StrukDrawer({
             </AnimatePresence>
           </div>
         )}
-      </Drawer>
+      </Panel>
       <MotionConfig reducedMotion="user">
         <Modal
           open={pembayaranBuka && sale !== null}
