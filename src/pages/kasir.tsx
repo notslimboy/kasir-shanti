@@ -13,7 +13,7 @@ import { useSetelan } from "@/lib/setelan";
 import { InputCustomer } from "@/components/ui/input-customer";
 import { CatatanInput } from "@/components/ui/catatan-input";
 import { saranCustomer } from "@/lib/cocok-customer";
-import { saldoDepositUntuk } from "@/lib/deposit-customer";
+import { customerDepositUntuk } from "@/lib/deposit-customer";
 import { triggerSyncFromSheet } from "@/lib/sync-google-sheet";
 import { rapikanCatatan, ringkasCatatan } from "@/lib/catatan-item";
 import { cssStruk, strukHtml, type DataStruk } from "@/lib/struk";
@@ -387,11 +387,12 @@ export function KasirPage() {
 
   const subtotal = cart.reduce((a, i) => a + i.price * i.qty, 0);
   const total = Math.max(0, subtotal - diskon + ongkir);
-  const saldoCustomer = (() => {
+  const cocokDeposit = (() => {
     const nama = customer.trim();
-    if (!nama) return 0;
-    return saldoDepositUntuk(nama, live.customers, live.customerAlias);
+    if (!nama) return null;
+    return customerDepositUntuk(nama, live.customers, live.customerAlias);
   })();
+  const saldoCustomer = cocokDeposit?.deposit ?? 0;
   const dipakai = Math.max(0, Math.min(saldoCustomer, total));
   const totalBayar = total - dipakai;
 
@@ -437,8 +438,14 @@ export function KasirPage() {
     }
     setMenyelesaikan(true);
     try {
+      /* customerId: id numerik dari hasil fuzzy match — dipakai simpan-penjualan
+         untuk kurangi deposit lewat id, bukan nama bebas. */
+      const customerId = cocokDeposit
+        ? Number(cocokDeposit.customer.id?.replace(/^c/, "")) || null
+        : null;
       const hasil = await simpanPenjualan({
         customer,
+        customerId,
         payment: pay,
         items: jadiBarisJual(),
         ongkir,

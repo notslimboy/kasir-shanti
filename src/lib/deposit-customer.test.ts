@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { saldoDepositUntuk } from "./deposit-customer";
+import { customerDepositUntuk, saldoDepositUntuk } from "./deposit-customer";
 
 const customers = [
   { id: "c1", name: "Bhaskara V/56", deposit: 50_000 },
@@ -87,5 +87,39 @@ describe("saldoDepositUntuk", () => {
     ];
     /* "Mutiara Indah" lebih panjang dari "Indah", jadi cocok "Mutiara Indah" dulu. */
     expect(saldoDepositUntuk("Pesan untuk Mutiara Indah", banyak, [])).toBe(30_000);
+  });
+});
+
+describe("customerDepositUntuk", () => {
+  const cust = [
+    { id: "c1", name: "Bhaskara V/56", deposit: 50_000 },
+    { id: "c2", name: "Mutiara Indah", deposit: 30_000 },
+  ];
+  const ali = [
+    { customer_id: 1, alias: "Bhas 7/17" },
+    { customer_id: 2, alias: "Muti" },
+  ];
+
+  it("mengembalikan customer dan deposit untuk nama persis", () => {
+    const r = customerDepositUntuk("Bhaskara V/56", cust, ali);
+    expect(r).not.toBeNull();
+    expect(r!.customer.id).toBe("c1");
+    expect(r!.customer.name).toBe("Bhaskara V/56");
+    expect(r!.deposit).toBe(50_000);
+  });
+
+  it("mengembalikan null untuk nama asing", () => {
+    expect(customerDepositUntuk("Orang Asing", cust, ali)).toBeNull();
+  });
+
+  it("mengembalikan null untuk string kosong", () => {
+    expect(customerDepositUntuk("", cust, ali)).toBeNull();
+  });
+
+  it("mengembalikan customer lewat alias persis dengan id string", () => {
+    const r = customerDepositUntuk("  bhas 7/17  ", cust, ali);
+    expect(r).not.toBeNull();
+    expect(r!.customer.id).toBe("c1");
+    expect(r!.deposit).toBe(50_000);
   });
 });

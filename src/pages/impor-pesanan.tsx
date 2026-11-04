@@ -408,7 +408,7 @@ export function ImporPesananPage() {
   /* Struk thermal untuk satu pesanan. Pratinjau dan cetak-after-simpan
      memakai fungsi yang sama persis, jadi yang terlihat di layar = yang
      keluar dari printer. */
-  const strukUntuk = (p: PesananImpor, receiptNo: string, no?: number) =>
+  const strukUntuk = (p: PesananImpor, receiptNo: string, no?: number, depositUsed = 0) =>
     strukHtml({
       receiptNo,
       customerName: p.customer || "Customer belum diisi",
@@ -420,6 +420,7 @@ export function ImporPesananPage() {
       subtotal: p.subtotal,
       shipping: p.ongkir,
       total: p.total,
+      usedDeposit: depositUsed,
       items: p.items.map((i) => ({
         name: i.nama,
         variant: i.varian,
@@ -437,10 +438,10 @@ export function ImporPesananPage() {
 
      Nomor antrean yang dicetak = nomor yang benar-benar tersimpan di
      server, bukan lagi perkiraan "mulaiNo + urutan". */
-  const cetakSemua = (daftar: { receiptNo: string; queueNo?: number; pesanan: PesananImpor }[]) => {
+  const cetakSemua = (daftar: { receiptNo: string; queueNo?: number; pesanan: PesananImpor; depositUsed?: number }[]) => {
     if (!daftar.length) return;
     void cetakStruk(
-      daftar.map((s) => ({ html: strukUntuk(s.pesanan, s.receiptNo, s.queueNo ?? nomorDraft(s.pesanan)) })),
+      daftar.map((s) => ({ html: strukUntuk(s.pesanan, s.receiptNo, s.queueNo ?? nomorDraft(s.pesanan), s.depositUsed ?? 0) })),
       setelan,
     );
   };

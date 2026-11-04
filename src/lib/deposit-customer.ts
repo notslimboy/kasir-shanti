@@ -19,7 +19,15 @@ function idNumerik(c: { id?: string }): number {
 }
 
 /**
- * Saldo deposit customer terbaik yang cocok dengan `nama`.
+ * Hasil pencocokan customer deposit: customer yang cocok dan saldonya.
+ */
+export type CocokDeposit = {
+  customer: { id?: string; name: string; deposit: number };
+  deposit: number;
+};
+
+/**
+ * Cari customer & saldo deposit terbaik yang cocok dengan `nama`.
  *
  * `customers` — dari UI, tiap elemen minimal punya `name` dan `deposit`.
  *                Kalau ada `id` dalam format "c{number}", dipakai untuk
@@ -32,25 +40,25 @@ function idNumerik(c: { id?: string }): number {
  *   3. nama yang memuat nama customer (longest match dulu)
  *   4. alias yang memuat
  *
- * Kalau tidak ada yang cocok → 0.
+ * Kalau tidak ada yang cocok → null.
  */
-export function saldoDepositUntuk(
+export function customerDepositUntuk(
   nama: string,
   customers: readonly ({ name: string; deposit: number } & { id?: string })[],
   alias: readonly { customer_id: number; alias: string }[],
-): number {
+): CocokDeposit | null {
   const cari = kunciNama(nama);
-  if (!cari) return 0;
+  if (!cari) return null;
 
   /* (1) nama persis case/space-insensitive */
   const persis = customers.find((c) => kunciNama(c.name) === cari);
-  if (persis) return persis.deposit;
+  if (persis) return { customer: persis, deposit: persis.deposit };
 
   /* (2) alias persis — cari customer yang punya alias = input */
   for (const a of alias) {
     if (kunciNama(a.alias) === cari) {
       const c = customers.find((x) => a.customer_id === idNumerik(x));
-      if (c) return c.deposit;
+      if (c) return { customer: c, deposit: c.deposit };
     }
   }
 
@@ -58,7 +66,7 @@ export function saldoDepositUntuk(
   const urutNama = [...customers].sort((a, b) => b.name.length - a.name.length);
   for (const c of urutNama) {
     const cKunci = kunciNama(c.name);
-    if (cKunci && cari.includes(cKunci)) return c.deposit;
+    if (cKunci && cari.includes(cKunci)) return { customer: c, deposit: c.deposit };
   }
 
   /* (4) alias yang memuat */
@@ -67,9 +75,22 @@ export function saldoDepositUntuk(
     const aKunci = kunciNama(a.alias);
     if (aKunci && cari.includes(aKunci)) {
       const c = customers.find((x) => a.customer_id === idNumerik(x));
-      if (c) return c.deposit;
+      if (c) return { customer: c, deposit: c.deposit };
     }
   }
 
-  return 0;
+  return null;
+}
+
+/**
+ * Saldo deposit customer terbaik yang cocok dengan `nama`.
+ *
+ * Thin wrapper around `customerDepositUntuk` — returns 0 on no match.
+ */
+export function saldoDepositUntuk(
+  nama: string,
+  customers: readonly ({ name: string; deposit: number } & { id?: string })[],
+  alias: readonly { customer_id: number; alias: string }[],
+): number {
+  return customerDepositUntuk(nama, customers, alias)?.deposit ?? 0;
 }

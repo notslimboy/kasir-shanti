@@ -36,7 +36,7 @@ export type HasilSimpanPesanan = {
   /* Struk yang benar-benar tersimpan, untuk "Proses + Cetak Semua".
      Hanya berisi struk yang itemnya ikut tersimpan — mencetak struk
      tanpa item hanya menghasilkan kertas yang salah. */
-  struk: { receiptNo: string; queueNo: number; pesanan: PesananImpor }[];
+  struk: { receiptNo: string; queueNo: number; pesanan: PesananImpor; depositUsed: number }[];
   /** Tanggal proses yang dipakai semua struk pada batch ini (YYYY-MM-DD). */
   tanggalProses: string;
 };
@@ -208,7 +208,7 @@ export async function simpanPesananImpor(
     antrean = Math.max(0, (options.mulaiNo ?? 1) - 1);
   }
 
-  const struk: { receiptNo: string; queueNo: number; pesanan: PesananImpor }[] = [];
+  const struk: { receiptNo: string; queueNo: number; pesanan: PesananImpor; depositUsed: number }[] = [];
 
   /* Saldo deposit berjalan per customer (id → sisa). */
   const saldoBerjalan = new Map<number, number>();
@@ -333,7 +333,7 @@ export async function simpanPesananImpor(
        "mulaiNo + urutan" — kalau hari itu sudah ada struk dari Kasir,
        nomor antrean meloncat dan nomor di kertas jadi tidak cocok dengan
        KOT Dapur. */
-    struk.push({ receiptNo, queueNo, pesanan: p });
+    struk.push({ receiptNo, queueNo, pesanan: p, depositUsed: depositPakai });
     selesai++;
     options.onProgress?.(selesai, total);
   }

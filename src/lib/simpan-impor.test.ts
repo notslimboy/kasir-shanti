@@ -227,10 +227,11 @@ describe("pelaporan proses", () => {
 });
 
 describe("deposit otomatis", () => {
-  it("tanpa customerInfo — paid_amount tetap 0", async () => {
+  it("tanpa customerInfo — paid_amount tetap 0, depositUsed 0", async () => {
     Pasang();
-    await simpanPesananImpor([pesanan()]);
+    const r = await simpanPesananImpor([pesanan()]);
     expect(sales()[0].body.paid_amount).toBe(0);
+    expect(r.struk[0].depositUsed).toBe(0);
   });
 
   it("satu customer dengan saldo 20.000, dua struk (75.000 dan 50.000)", async () => {
@@ -258,6 +259,9 @@ describe("deposit otomatis", () => {
 
     expect(r.tersimpan).toBe(2);
     expect(r.gagal).toBe(0);
+    /* struk[].depositUsed ikut tercatat untuk cetak */
+    expect(r.struk[0].depositUsed).toBe(20_000);
+    expect(r.struk[1].depositUsed).toBe(0);
   });
 
   it("PATCH deposit_balance sekali dengan nilai benar", async () => {

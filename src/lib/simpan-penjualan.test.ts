@@ -296,4 +296,129 @@ describe("simpanPenjualan — deposit", () => {
     );
     expect(ledger).toHaveLength(0);
   });
+
+  it("customerId diprioritaskan walau nama alias/free text", async () => {
+    depositPanggil.length = 0;
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url: string, init?: RequestInit) => {
+        const method = init?.method ?? "GET";
+        const body = init?.body ? JSON.parse(String(init.body)) : {};
+        depositPanggil.push({ url: String(url), method, body });
+        const u = String(url);
+        const json = (d: unknown, status = 200) =>
+          new Response(JSON.stringify(d), { status, headers: { "Content-Type": "application/json" } });
+
+        if (method === "GET" && u.includes("/sales?")) return json([]);
+        /* customerId=3 → cari lewat id, bukan name */
+        if (method === "GET" && u.includes("id=eq.3")) return json([{ id: 3, name: "Bhaskara VII", deposit_balance: 80_000 }]);
+        if (method === "GET" && (u.includes("/rest/v1/customers") || u.includes("name=eq.")))
+          return json([]); /* name lookup kosong — nama free text tidak dikenal */
+        if (method === "GET") return json([]);
+        if (method === "POST" && (u.endsWith("/sales") || u.includes("/sales?")))
+          return json([{ id: 42 }]);
+        if (method === "POST" && u.includes("/sale_items")) return json([{ id: 1 }]);
+        if (method === "PATCH" && u.includes("/rest/v1/customers"))
+          return json([{ id: 3 }]);
+        if (method === "PATCH") return json([{ id: 99 }]);
+        if (method === "POST") return json([{ id: 1 }]);
+        return json([]);
+      }),
+    );
+
+    const hasil = await simpanPenjualan({
+      ...PENJUALAN,
+      customer: "Alias tak dikenal",  /* name lookup akan gagal */
+      customerId: 3,                  /* tapi id ini yang dipakai */
+      usedDeposit: 30_000,
+      completedAt: new Date("2026-10-16T04:00:00Z"),
+    });
+
+    expect(hasil.id).toBe(42);
+    expect(hasil.struk.usedDeposit).toBe(30_000);
+
+    /* Deduction menggunakan customer id=3 */
+    const getCustomer = depositPanggil.find(
+      (p) => p.method === "GET" && p.url.includes("id=eq.3"),
+    );
+    expect(getCustomer).toBeDefined();
+
+    const patchCustomers = depositPanggil.filter(
+      (p) => p.method === "PATCH" && p.url.includes("/rest/v1/customers") && p.body.deposit_balance !== undefined,
+    );
+    expect(patchCustomers).toHaveLength(1);
+    /* 80.000 - 30.000 = 50.000 */
+    expect(patchCustomers[0].body.deposit_balance).toBe(50_000);
+    expect(hasil.peringatanDeposit).toBeUndefined();
+  });
+
+  it("lookup nama ber-spasi tidak double-encode URL", async () => {
+    tiruServerDeposit();
+    await simpanPenjualan({
+      ...PENJUALAN,
+      customer: "Gimo Gg 3 - Bhaskara 3/10",
+      usedDeposit: 10_000,
+      completedAt: new Date("2026-10-16T04:00:00Z"),
+    });
+
+    /* Bug produksi: `searchParams.set("name", \`eq.${encodeURIComponent(n)}\`)`
+       di-encode dua kali, jadi PostgREST menerima "Gimo%2520Gg%..." dan
+       tidak menemukan customer — deposit tidak pernah terpotong dan tidak
+       ada yang tahu. Ceknya: decode sekali harus menghasilkan nama persis. */
+    const getByName = depositPanggil.find(
+      (p) => p.method === "GET" && p.url.includes("name=eq."),
+    );
+    expect(getByName).toBeDefined();
+    const namaDiUrl = new URL(getByName!.url).searchParams.get("name");
+    expect(namaDiUrl).toBe("eq.Gimo Gg 3 - Bhaskara 3/10");
+
+    /* Dan pengurangan tetap jalan */
+    const patchDeposit = depositPanggil.find(
+      (p) => p.method === "PATCH" && p.url.includes("/rest/v1/customers") && p.body.deposit_balance !== undefined,
+    );
+    expect(patchDeposit).toBeDefined();
+  });
+
+  it("customer tidak ditemukan → peringatan, bukan diam", async () => {
+    depositPanggil.length = 0;
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url: string, init?: RequestInit) => {
+        const method = init?.method ?? "GET";
+        const body = init?.body ? JSON.parse(String(init.body)) : {};
+        depositPanggil.push({ url: String(url), method, body });
+        const u = String(url);
+        const json = (d: unknown, status = 200) =>
+          new Response(JSON.stringify(d), { status, headers: { "Content-Type": "application/json" } });
+
+        if (method === "GET" && u.includes("/sales?")) return json([]);
+        /* Lookup customer selalu kosong — nama tidak dikenal dan tidak ada customerId */
+        if (method === "GET" && u.includes("/rest/v1/customers")) return json([]);
+        if (method === "GET") return json([]);
+        if (method === "POST" && (u.endsWith("/sales") || u.includes("/sales?")))
+          return json([{ id: 99 }]);
+        if (method === "POST" && u.includes("/sale_items")) return json([{ id: 1 }]);
+        if (method === "PATCH") return json([{ id: 99 }]);
+        if (method === "POST") return json([{ id: 1 }]);
+        return json([]);
+      }),
+    );
+
+    const hasil = await simpanPenjualan({
+      ...PENJUALAN,
+      customer: "Nama Asing",
+      usedDeposit: 5_000,
+      completedAt: new Date("2026-10-16T04:00:00Z"),
+    });
+
+    /* Struk tetap tersimpan, tapi kasir TAHU depositnya tidak terpotong */
+    expect(hasil.id).toBe(99);
+    expect(hasil.peringatanDeposit).toBeDefined();
+    expect(hasil.peringatanDeposit!).toContain("deposit");
+
+    const ledger = depositPanggil.filter(
+      (p) => p.method === "POST" && p.url.includes("deposit_ledger"),
+    );
+    expect(ledger).toHaveLength(0);
+  });
 });

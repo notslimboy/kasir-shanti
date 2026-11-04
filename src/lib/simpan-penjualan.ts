@@ -34,6 +34,7 @@ export type BarisJual = {
 
 export type PayloadJual = {
   customer: string;
+  customerId?: number | null;
   payment: string;
   items: BarisJual[];
   ongkir: number;
@@ -183,7 +184,10 @@ async function sentuhCustomer(nama: string, ongkir: number, completedAt: Date): 
   if (!namaBersih) return;
   const headers = { ...headerRest(), "Content-Type": "application/json", Prefer: "return=representation" };
   const url = new URL(`${SUPABASE_URL}/rest/v1/customers`);
-  url.searchParams.set("name", `eq.${encodeURIComponent(namaBersih)}`);
+  /* Jangan encodeURIComponent di sini: searchParams.set sudah meng-encode
+     saat URL diserialkan. Kalau di-encode dua kali, "Gimo Gg 3" sampai ke
+     PostgREST sebagai "Gimo%20Gg%203" dan lookup nama selalu kosong. */
+  url.searchParams.set("name", `eq.${namaBersih}`);
   url.searchParams.set("select", "id,name,last_order_at,default_shipping");
   const cari = await fetch(url, { headers: headerRest() });
   if (!cari.ok) return;
@@ -220,31 +224,66 @@ async function sentuhCustomer(nama: string, ongkir: number, completedAt: Date): 
  * Dipanggil setelah struk berhasil tersimpan. Kalau gagal, transaksi tetap
  * jadi — deposit terpakai sudah tercatat di `deposit_used` dan pemanggil
  * bisa melihat peringatan lewat `HasilJual.peringatanDeposit`.
+ *
+ * `customerId` prioritas: kalau > 0, cari lewat id (stabil walau nama alias).
+ * Jatuh ke nama persis kalau id tidak diberikan.
  */
-async function kurangiDepositCustomer(nama: string, jumlah: number, saleId: number, receiptNo: string): Promise<void> {
-  const namaBersih = String(nama || "").trim();
-  if (!namaBersih || jumlah <= 0) return;
+async function kurangiDepositCustomer(
+  customerId: number | null,
+  nama: string,
+  jumlah: number,
+  saleId: number,
+  receiptNo: string,
+): Promise<void> {
+  if (jumlah <= 0) return;
   const headers = { ...headerRest(), "Content-Type": "application/json", Prefer: "return=representation" };
-  const url = new URL(`${SUPABASE_URL}/rest/v1/customers`);
-  url.searchParams.set("name", `eq.${encodeURIComponent(namaBersih)}`);
-  url.searchParams.set("select", "id,name,deposit_balance");
-  const cari = await fetch(url, { headers: headerRest() });
-  if (!cari.ok) throw new Error(`Gagal membaca customer (${cari.status}).`);
-  const ada = (await cari.json()) as Pick<CustomerRow, "id" | "name" | "deposit_balance">[];
-  if (!ada[0]) {
-    /* Customer tidak ada di tabel — deposit tidak bisa dikurangi. Transaksi
-       tetap jadi, peringatan dikembalikan. */
-    return;
+
+  let baris: Pick<CustomerRow, "id" | "name" | "deposit_balance"> | null = null;
+
+  if (customerId && customerId > 0) {
+    const url = new URL(`${SUPABASE_URL}/rest/v1/customers`);
+    url.searchParams.set("id", `eq.${customerId}`);
+    url.searchParams.set("select", "id,name,deposit_balance");
+    const cari = await fetch(url, { headers: headerRest() });
+    if (cari.ok) {
+      const data = (await cari.json()) as Pick<CustomerRow, "id" | "name" | "deposit_balance">[];
+      baris = data[0] ?? null;
+    }
   }
-  const saldoBaru = Math.max(0, n(ada[0].deposit_balance) - jumlah);
-  const patch = await fetch(`${SUPABASE_URL}/rest/v1/customers?id=eq.${ada[0].id}`, {
+
+  /* Fallback: cari lewat nama persis */
+  if (!baris) {
+    const namaBersih = String(nama || "").trim();
+    if (!namaBersih) return;
+    const url = new URL(`${SUPABASE_URL}/rest/v1/customers`);
+    /* Jangan encodeURIComponent di sini: searchParams.set sudah meng-encode
+       saat URL diserialkan. Kalau di-encode dua kali, "Gimo Gg 3" sampai ke
+       PostgREST sebagai "Gimo%20Gg%203" dan lookup nama selalu kosong. */
+    url.searchParams.set("name", `eq.${namaBersih}`);
+    url.searchParams.set("select", "id,name,deposit_balance");
+    const cari = await fetch(url, { headers: headerRest() });
+    if (!cari.ok) throw new Error(`Gagal membaca customer (${cari.status}).`);
+    const data = (await cari.json()) as Pick<CustomerRow, "id" | "name" | "deposit_balance">[];
+    baris = data[0] ?? null;
+  }
+
+  if (!baris) {
+    /* Dulu: return diam-diam. Akibatnya struk tercatat deposit_used tapi
+       saldo tidak pernah berkurang, tidak ada baris ledger, dan kasir tidak
+       melihat apa-apa. Lempar supaya simpanPenjualan menampilkan
+       peringatanDeposit — transaksi tetap tersimpan, tapi kasir TAHU. */
+    throw new Error(`Customer "${nama}" tidak ditemukan untuk pemotongan deposit.`);
+  }
+
+  const saldoBaru = Math.max(0, n(baris.deposit_balance) - jumlah);
+  const patch = await fetch(`${SUPABASE_URL}/rest/v1/customers?id=eq.${baris.id}`, {
     method: "PATCH",
     headers,
     body: JSON.stringify({ deposit_balance: saldoBaru, updated_at: new Date().toISOString() }),
   });
   if (!patch.ok) throw new Error(`Gagal mengupdate deposit (${patch.status}).`);
   await catatMutasiDeposit({
-    customerId: ada[0].id,
+    customerId: baris.id,
     saleId,
     amount: -jumlah,
     note: `Dipakai di struk ${receiptNo}`,
@@ -342,7 +381,7 @@ export async function simpanPenjualan(payload: PayloadJual): Promise<HasilJual> 
   let peringatanDeposit: string | undefined;
   if (deposit > 0) {
     try {
-      await kurangiDepositCustomer(payload.customer, deposit, id, receiptNo);
+      await kurangiDepositCustomer(payload.customerId ?? null, payload.customer, deposit, id, receiptNo);
     } catch (e) {
       peringatanDeposit = `Saldo deposit tidak bisa dikurangi: ${(e as Error).message}`;
     }
