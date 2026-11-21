@@ -26,6 +26,35 @@ _KEY_BELUM_DIATUR = (
 )
 
 
+def _render_customer_table(rows):
+    """Render the Markdown customer mapping table used by the parser reference.
+
+    The table is written to the gitignored ``customer-table.md`` because it
+    contains real customer names, home addresses, and shipping fees.
+    """
+
+    def bersih(value):
+        return str(value or "").replace('"', "'").strip()
+
+    lines = [
+        "## DATABASE CONTEXT: OFFICIAL CUSTOMERS & ONGKIR",
+        "",
+        "| Customer | Aliases | Ongkir |",
+        "| --- | --- | --- |",
+    ]
+    for row in sorted(rows, key=lambda r: str(r.get("name", "")).casefold()):
+        name = bersih(row.get("name"))
+        aliases = [
+            bersih(a)
+            for a in str(row.get("aliases", "")).split(";")
+            if bersih(a) and bersih(a).lower() != name.lower()
+        ]
+        alias_cell = "; ".join(f'"{a}"' for a in aliases) if aliases else "-"
+        ongkir = bersih(row.get("default_shipping")) or "0"
+        lines.append(f"| **{name}** | {alias_cell} | {ongkir} |")
+    return lines
+
+
 def supabase_key():
     key = os.environ.get("SUPABASE_KEY", "").strip()
     if not key:
@@ -223,6 +252,27 @@ def main():
             f"WARNING {warning['type']}: {warning['customer']} "
             f"({warning['detail']})"
         )
+
+    # Write the canonical customer table for the parser. This file holds real
+    # names and home addresses, so it is gitignored and must stay local.
+    table_file = pathlib.Path("customer-table.md")
+    temp_table_file = table_file.with_suffix(".md.tmp")
+    try:
+        lines = [
+            "# Canonical Customer Table (local, do not commit)",
+            "",
+            "Generated from Supabase `customers` + `customer_aliases`. The DB is the",
+            "authority; never hand-edit. Regenerate with `python3 update_customers_csv.py`.",
+            "",
+        ]
+        lines.extend(_render_customer_table(parser_reference))
+        temp_table_file.write_text("\n".join(lines) + "\n", encoding="utf-8")
+        temp_table_file.replace(table_file)
+        print(f"Tabel customer ditulis ke: {table_file} ({len(parser_reference)} baris)")
+    except Exception as e:
+        temp_table_file.unlink(missing_ok=True)
+        print(f"Error menulis tabel customer: {e}")
+        return 1
 
     # Also sync to local SQLite
     print("Sinkronisasi ke SQLite lokal (kasir-bento.sqlite3)...")

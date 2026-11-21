@@ -75,3 +75,6 @@ __pycache__/
 # contoh konfigurasi berhenti ikut repo. Negasi diulang di sini, setelahnya.
 .env*
 !.env.example
+
+# Canonical customer table for the parser: real names + home addresses.
+customer-table.md

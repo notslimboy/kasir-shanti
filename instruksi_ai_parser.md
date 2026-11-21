@@ -60,6 +60,8 @@ model context. Only the local script reads those two raw files.
 5. The AI cleans orders, additions, revisions, cancellations, notes, delivery,
    payment, customer, shipping, and limited stock.
 6. Run the full QA gate, then emit or write the final CSV.
+7. Show the KOT recap (see `## KOT Recap`) after the CSV. The recap is part of
+   the deliverable, not an optional courtesy.
 
 The work bundle lives in `orderan/hasil-parser/<date range>/` and must never
 modify a final order CSV. Its main files:
@@ -243,6 +245,62 @@ Do not finalize until every check below passes:
 6. The CSV has exactly 9 columns and can be read with the `csv` module.
 7. For appends, no old row disappeared and the row-count increase equals the
    planned addition.
+8. The KOT recap exists, its per-item totals equal the final CSV, and its grand
+   total equals the sum of every `quantity` in the CSV.
 
 If one conflict is still unresolved, stop writing and use `[PERLU REVIEW]` or
 ask the user. A wrong address is worse than holding one order for review.
+
+## KOT Recap (Mandatory Summary)
+
+After the final CSV passes the QA gate, always show a KOT (kitchen order)
+recap. It is what the kitchen cooks from, so it must be computed from the final
+CSV rows only — never from `hasil-parser.csv`, candidates, or memory.
+
+Format, in Indonesian:
+
+```text
+| Menu | Porsi | Order | Harga | Subtotal |
+| --- | ---: | ---: | ---: | ---: |
+| <item> | <sum quantity> | <number of order groups that contain it> | <menu price> | <porsi x harga> |
+| **TOTAL** | <sum porsi> | | | <sum subtotal> |
+```
+
+Rules:
+
+- One row per menu item with at least one accepted row. Sort by `Porsi`
+  descending; on a tie, keep today's menu order.
+- `Porsi` is the sum of `quantity`, not the number of CSV rows.
+- `Order` counts distinct order groups (one customer's order is one group), so an
+  item ordered twice by the same customer counts once.
+- `Harga` is today's menu price. `Subtotal` is `Porsi x Harga`. A row-level
+  custom `harga` must not leak into the menu price.
+- Add the `TOTAL` row with total porsi and total rupiah.
+- Below the table, always state:
+  - total ongkir — sum of the `ongkir` of each order group once, not per row;
+  - payment split when any order carries a payment value, e.g.
+    `Transfer: 2 order, QRIS: 1 order`, otherwise `Payment: belum ada yang
+    ditandai`;
+  - number of order groups and number of item rows;
+  - `Tidak ada pesanan: <menu items with zero porsi>`;
+  - held items: every `[PERLU REVIEW]` row, excluded from the recap, with the
+    reason it is held.
+- Menu items that exist today but are sold out stay in the zero list and are not
+  given a porsi.
+- When the CSV changes (append or correction), recompute the whole recap and
+  state the row count before and after. Never adjust a previous recap by hand.
+- The recap never replaces the CSV and never modifies a row.
+
+## DATABASE CONTEXT: OFFICIAL CUSTOMERS & ONGKIR
+
+The canonical customer table is **not** stored in this file. It lives in
+`customer-table.md` at the repo root, which is gitignored on purpose: it holds
+real customer names, home addresses, and shipping fees, and this repository is
+public. Never paste that table into a committed file.
+
+- Regenerate it from Supabase together with `customers.csv`:
+  `python3 update_customers_csv.py` writes both files.
+- `scripts/parser_customer_reference.py` reads `customer-table.md`
+  automatically. When the file is missing (fresh clone) it falls back to this
+  document, so keep the heading text `## DATABASE CONTEXT: OFFICIAL CUSTOMERS & ONGKIR` unchanged.
+- Supabase `customers` is the authority. Never hand-edit the table.

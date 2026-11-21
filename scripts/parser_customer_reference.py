@@ -20,6 +20,22 @@ ROOT = Path(__file__).resolve().parents[1]
 HEADER = ["id", "name", "default_shipping", "tag", "aliases"]
 TABLE_HEADING = "## DATABASE CONTEXT: OFFICIAL CUSTOMERS & ONGKIR"
 
+# The canonical customer table holds real names, home addresses, and shipping
+# fees. It must never be committed, so it lives in its own gitignored file and
+# the committed rules file only points at it.
+CUSTOMER_TABLE_PATH = ROOT / "customer-table.md"
+
+
+def load_reference_table(rules_path: Path) -> Path:
+    """Return the file that holds the customer mapping table.
+
+    ``customer-table.md`` wins when present. Older checkouts kept the table
+    inside ``instruksi_ai_parser.md``, so that file stays a valid fallback.
+    """
+    if CUSTOMER_TABLE_PATH.is_file():
+        return CUSTOMER_TABLE_PATH
+    return rules_path
+
 
 def normalize_key(value: str) -> str:
     text = unicodedata.normalize("NFKD", str(value or ""))
@@ -187,7 +203,7 @@ def build_reference_rows(
     rules_path: Path,
 ) -> tuple[list[dict[str, str]], list[dict[str, str]]]:
     base_rows, base_warnings = consolidate_base_rows(base_rows)
-    mappings = parse_parser_mappings(rules_path)
+    mappings = parse_parser_mappings(load_reference_table(rules_path))
     if not mappings:
         reference = [{name: row.get(name, "") for name in HEADER} for row in base_rows]
         reference.sort(key=lambda row: (row["name"].casefold(), row["id"]))
