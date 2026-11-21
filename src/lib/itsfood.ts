@@ -265,6 +265,13 @@ export function parseRupiah(raw: string): number {
   return digits ? parseInt(digits, 10) : 0;
 }
 
+/** Nama item di portal menempelkan nama brand ("Es Degan - Shanti
+   Catering") — di dashboard dan file CSV itu noise. Dibuang di lapisan
+   tampilan saja; parser tetap menyimpan nilai verbatim. */
+export function bersihkanNamaItem(name: string): string {
+  return name.replace(/\s*-\s*Shanti Catering\s*$/i, "");
+}
+
 /** `<tbody>` → array of cell-text arrays, dari markup responsif portal:
     tiap <td> punya label mobile ("Amount:") yang dibuang dulu supaya
     tidak menempel di nilai. */

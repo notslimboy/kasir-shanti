@@ -7,6 +7,7 @@ import { Toast, useToast } from "@/components/ui/toast";
 import { Memuat } from "@/components/ui/memuat";
 import { getAccessToken } from "@/supabase/client";
 import {
+  bersihkanNamaItem,
   linkWa,
   petaBayarDari,
   parseRupiah,
@@ -21,6 +22,7 @@ import {
   type PetaBayarOrder,
 } from "@/lib/itsfood";
 import { rupiah } from "@/lib/format";
+import { unduhCsvItsfoodHarian } from "@/lib/itsfood-export";
 import type { RekapPembayaran } from "@/lib/itsfood";
 import { bacaCacheKlien, dgnCacheKlien, kosongkanCacheKlien, segarkanKlien } from "@/lib/itsfood-api";
 import { cn } from "@/lib/utils";
@@ -482,6 +484,21 @@ export function ItsfoodPage() {
             </span>
           </h2>
           <div className="flex items-center gap-2">
+            {ordersHari.length > 0 && (
+              <button
+                onClick={() => {
+                  const hasil = unduhCsvItsfoodHarian(hariDipilihIso, ordersHari, detailPerId);
+                  setToast(
+                    hasil.ok
+                      ? { tone: "ok", text: `CSV diunduh: ${hasil.namaFile}` }
+                      : { tone: "warn", text: hasil.pesan },
+                  );
+                }}
+                className="rounded-full border border-border px-3 py-1.5 text-xs font-semibold text-muted-foreground transition-colors hover:border-primary hover:text-foreground"
+              >
+                Download CSV
+              </button>
+            )}
             {ordersHari.length > 0 && (
               <button
                 onClick={() => setRingkasanTerbuka((t) => !t)}
@@ -963,12 +980,8 @@ function KartuOrder({
   );
 }
 
-/* Nama item di portal menempelkan nama brand ("Es Degan - Shanti
-   Catering") — di dashboard itu noise. Dibuang di lapisan tampilan saja;
-   parser tetap menyimpan nilai verbatim. */
-function bersihkanNamaItem(name: string): string {
-  return name.replace(/\s*-\s*Shanti Catering\s*$/i, "");
-}
+/* Nama item dibersihkan di lapisan data — lihat `bersihkanNamaItem` di
+   src/lib/itsfood.ts. */
 
 /** Nilai terakhir yang tidak null — konten dialog tetap stabil selama
     animasi EXIT berjalan setelah state-nya dinolkan.
