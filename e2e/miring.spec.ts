@@ -193,7 +193,10 @@ test.describe("mobile", () => {
     await page.goto("/penjualan");
     await page.waitForLoadState("networkidle");
 
-    const cari = page.getByPlaceholder("Cari no struk atau customer...");
+    /* Dicari lewat aria-label, bukan placeholder: teks placeholder ikut
+       berubah waktu kemampuan pencarian bertambah (nama menu), dan tes ini
+       tidak seharusnya gagal hanya karena kalimatnya dirapikan. */
+    const cari = page.getByRole("textbox", { name: /cari no struk/i });
     /* Hanya baris data. Tabel juga merender satu baris untuk keadaan
        kosong (selnya `colSpan`), jadi `tbody tr` biasa ikut terhitung
        dan assertion "nol hasil" akan selalu gagal — bukan karena

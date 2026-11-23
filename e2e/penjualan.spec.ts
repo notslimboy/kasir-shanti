@@ -1,6 +1,6 @@
 import { expect, test } from "@playwright/test";
 
-import { SALE_FIXTURE, pakaiSupabasePalsu } from "./fixture-supabase";
+import { SALE_BARIS, SALE_FIXTURE, pakaiSupabasePalsu } from "./fixture-supabase";
 
 /* Tombol "muat ulang" di header Dashboard Penjualan.
 
@@ -251,4 +251,87 @@ test("memilih rentang custom menarik datanya sebelum tombol Terapkan", async ({ 
     tarikanSales - sesudahTerapkan,
     "menerapkan rentang custom menarik ulang data yang sudah ditarik",
   ).toBe(0);
+});
+
+/* Pencarian nama menu.
+
+   Pertanyaan yang mau dijawab kasir bukan "struk mana yang nomornya begini",
+   tapi "siapa saja yang pesan rawon, berapa orang". Karena itu pencarian juga
+   mencocokkan ISI struk, bukan cuma kolom di barisnya, dan hasilnya tetap
+   struk utuh — bukan potongan baris item. */
+test("pencarian nama menu menemukan struk siapa saja yang memesan menu itu", async ({ page }) => {
+  await page.setViewportSize({ width: 1280, height: 900 });
+
+  const struk = (id: number, no: string, nama: string) => ({
+    ...SALE_FIXTURE,
+    id,
+    receipt_no: no,
+    customer_name: nama,
+  });
+  const item = (id: number, saleId: number, nama: string, qty: number) => ({
+    ...SALE_BARIS,
+    id,
+    sale_id: saleId,
+    name: nama,
+    menu_name: nama,
+    quantity: qty,
+    line_total: 35_000 * qty,
+  });
+
+  await pakaiSupabasePalsu(page, {
+    sales: [
+      struk(1, "SH-20261006-0101", "Anis BTH"),
+      struk(2, "SH-20261006-0102", "Sadikin 11"),
+      struk(3, "SH-20261006-0103", "Toko Lain"),
+    ],
+    sale_items: [
+      item(1, 1, "Tepo Tahu", 2),
+      item(2, 2, "Rawon", 1),
+      item(3, 3, "Tepo Tahu", 1),
+      item(4, 3, "Rawon", 1),
+    ],
+  });
+
+  await page.goto("/penjualan");
+  await page.waitForLoadState("networkidle");
+
+  const cari = page.getByRole("textbox", { name: /cari no struk/i });
+  /* Baris tabel yang benar-benar data: tabel juga merender satu baris
+     keadaan kosong dengan `colSpan`, dan baris itu bukan hasil pencarian. */
+  const baris = page.locator("tbody tr:not(:has(td[colspan]))");
+  const ringkasan = page.getByRole("status").filter({ hasText: "struk ·" });
+
+  await expect(baris, "tiga struk tidak tampil sebelum mencari").toHaveCount(3);
+
+  await cari.fill("tepo");
+  await expect(
+    baris,
+    "mencari nama menu tidak menyaring struk — struk yang memesan menu itu harus muncul, yang lain tidak",
+  ).toHaveCount(2);
+  await expect(
+    ringkasan,
+    "ringkasan jumlah pemesan menu tidak muncul — kasir tidak tahu ada berapa orang",
+  ).toContainText("2 struk");
+  await expect(ringkasan, "jumlah porsi tidak ikut dihitung").toContainText("3 porsi");
+  await expect(ringkasan, "nama menu yang cocok tidak disebut").toContainText("Tepo Tahu");
+
+  /* Salah ketik adalah keadaan normal di meja kasir, bukan pengecualian:
+     "tepi tahu" harus tetap menemukan "Tepo Tahu". */
+  await cari.fill("tepi tahu");
+  await expect(baris, "salah ketik satu huruf membuat hasilnya kosong").toHaveCount(2);
+
+  await cari.fill("rawon");
+  await expect(baris, "pencarian menu kedua ikut menyaring").toHaveCount(2);
+  await expect(ringkasan).toContainText("2 porsi");
+
+  /* Menu yang tidak ada di struk mana pun: nol hasil, dan ringkasan menu
+     tidak boleh muncul seolah ada yang cocok. */
+  await cari.fill("lumpur");
+  await expect(baris, "menu yang tidak dipesan siapa pun malah menampilkan struk").toHaveCount(0);
+  await expect(ringkasan).toHaveCount(0);
+
+  /* Dikosongkan = semua kembali. Pencarian kosong tidak boleh menyembunyikan
+     daftar, karena itu keadaan awal halaman. */
+  await cari.fill("");
+  await expect(baris, "menghapus pencarian tidak mengembalikan seluruh daftar").toHaveCount(3);
 });

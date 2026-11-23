@@ -38,6 +38,7 @@ import { Select } from "@/components/ui/select";
 import { DateRangePicker, presetRentang, type DateRange } from "@/components/ui/date-range";
 import { rupiah, rupiahShort } from "@/lib/format";
 import type { Sale } from "@/lib/sale";
+import { ringkasMenu } from "@/lib/cari-menu";
 import { menuTerlarisDari, trenPerHari, trenPerJam } from "@/lib/ringkasan";
 import { grupPerKurir, kurirDariTag, KURIR_GROUPS, rekapOngkirPerKurir } from "@/lib/kurir";
 import { cetakLaporan } from "@/lib/cetak-laporan";
@@ -283,6 +284,26 @@ export function PenjualanPage() {
      yang belum pernah dihitung. */
   const { tagUntukNama } = data;
 
+  /* Status struk membatasi tabel Detail Struk, juga membatasi rekap hasil
+     pencarian menu supaya angka ringkasan sama dengan tab yang sedang dilihat. */
+  const strukPerStatus = useMemo(
+    () =>
+      status === "hapus"
+        ? struk.filter((s) => s.status === "terhapus")
+        : struk.filter((s) => s.status !== "terhapus"),
+    [struk, status],
+  );
+
+  /* Hasil fuzzy menu dihitung sekali untuk pencarian aktif. `tampil` berisi
+     struk utuh, jadi baris tetap memperlihatkan seluruh isi struk. */
+  const ringkasanCariMenu = useMemo(
+    () =>
+      cari.trim()
+        ? ringkasMenu(strukPerStatus, cari)
+        : { tampil: [], jumlahStruk: 0, totalPorsi: 0, rincian: [] },
+    [strukPerStatus, cari],
+  );
+
   /* Baris yang benar-benar tampil di tabel Detail Struk: `struk` sudah
      difilter rentang + customer, lalu disaring lagi oleh kotak pencarian
      dan diurutkan sesuai kolom yang diklik.
@@ -303,12 +324,12 @@ export function PenjualanPage() {
        ke sini, dan itu yang membuat tabnya berarti: tanpa filter ini,
        "hapus struk" tidak akan terlihat efeknya karena barisnya tetap
        nangkring di tabel. */
-    const perStatus: BarisStruk[] = (
-      status === "hapus"
-        ? struk.filter((s) => s.status === "terhapus")
-        : struk.filter((s) => s.status !== "terhapus")
-    ).map((s) => ({ ...s, tag: tagUntukNama(s.customer).trim() }));
+    const perStatus: BarisStruk[] = strukPerStatus.map((s) => ({
+      ...s,
+      tag: tagUntukNama(s.customer).trim(),
+    }));
     const kunci = cari.trim().toLowerCase();
+    const strukCocokMenu = new Set(ringkasanCariMenu.tampil.map((s) => s.id));
     /* Tag ikut dicari karena area punya kaitan dengan kurir: satu area = satu
        kurir, jadi "semua kiriman Sutorejo" lebih sering ditanyakan
        daripada nama per struk. Kurir (yang diturunkan dari tag) juga dicari,
@@ -320,12 +341,12 @@ export function PenjualanPage() {
           return (
             [s.receiptNo, s.customer, s.tag, kurir, s.payment, s.status].some((t) =>
               t.toLowerCase().includes(kunci),
-            ) || String(s.total).includes(kunci)
+            ) || String(s.total).includes(kunci) || strukCocokMenu.has(s.id)
           );
         })
       : perStatus;
     return urutkan(disaring, urutan, kolomNilai);
-  }, [struk, status, cari, urutan, tagUntukNama]);
+  }, [strukPerStatus, cari, urutan, tagUntukNama, ringkasanCariMenu]);
 
   /* KOT bukan daftar struk: itu rekap per nama menu untuk rentang yang
      sama dengan laporan. Pakai data yang sudah difilter, supaya angka di
@@ -1080,11 +1101,11 @@ export function PenjualanPage() {
         {/* Pencarian + pengurutan baris. Kotak cari jadi selebar layar di bawah
             sm: kalau hanya ikut flex dengan lebar tetap, sisa ruang habis
             dipakai tombol "Batal" yang ikut terpotong. */}
-        <div className="mb-3 flex flex-wrap items-center gap-2">
+        <div className="mb-3 flex flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-center">
           <TableSearch
             value={cari}
             onChange={setCari}
-            placeholder="Cari no struk atau customer..."
+            placeholder="Cari no struk, customer, atau nama menu..."
             className="w-full sm:w-auto sm:flex-1 sm:min-w-[220px]"
           />
           {/* Jumlah yang tampil harus jujur soal hasil saringan, bukan
@@ -1097,6 +1118,27 @@ export function PenjualanPage() {
             >
               {barisDetail.length} dari {struk.length} · Batal
             </button>
+          ) : null}
+          {cari.trim() && ringkasanCariMenu.rincian.length > 0 ? (
+            <p
+              role="status"
+              aria-live="polite"
+              aria-atomic="true"
+              className="min-w-0 break-words text-xs text-muted-foreground sm:basis-full"
+            >
+              {/* Angka yang ditanya lebih dulu ("ada berapa orang order rawon"),
+                  rincian menu menyusul supaya tidak mendahului jawabannya. */}
+              {`${ringkasanCariMenu.jumlahStruk} struk · ${ringkasanCariMenu.totalPorsi} porsi · `}
+              {ringkasanCariMenu.rincian.length === 1
+                ? ringkasanCariMenu.rincian[0].nama
+                : ringkasanCariMenu.rincian
+                    .slice(0, 3)
+                    .map((item) => `${item.nama} (${item.porsi})`)
+                    .join(", ") +
+                  (ringkasanCariMenu.rincian.length > 3
+                    ? `, +${ringkasanCariMenu.rincian.length - 3} lagi`
+                    : "")}
+            </p>
           ) : null}
         </div>
 

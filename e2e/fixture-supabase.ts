@@ -235,7 +235,10 @@ const TABEL: Record<string, unknown[]> = {
 
 /* Baris item dari struk fixture. SaleLine tidak bisa dibuat tanpa `id`
    (primary key baris di `sale_items`), jadi di sini ada. */
-const SALE_BARIS = {
+/** Diekspor supaya tes pencarian bisa menyusun struk dengan item berbeda.
+    Tanpa itu tiap struk memakai item yang sama dan pencarian nama menu tidak
+    bisa dibedakan dari pencarian biasa. */
+export const SALE_BARIS = {
   id: 1,
   sale_id: 1,
   sku: "",
