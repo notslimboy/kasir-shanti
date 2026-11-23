@@ -1157,7 +1157,7 @@ export function StrukDrawer({
                       customerName: form.customer,
                       chatDate: sale.completedAt,
                       queueNo: sale.queueNo ?? null,
-                      kurir: kurirDariTag(tagForm),
+                      kurir: kurirDariTag(tagForm || sale.tag),
                       /* Dari form, bukan string kosong — begitu pula `note`
                          per item di bawah. Keduanya dulu di-hardcode/dibuang,
                          jadi Cetak Ulang mencetak struk yang isinya berbeda

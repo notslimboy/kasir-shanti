@@ -5,6 +5,8 @@ import {
   lebarCetakMm,
   logoStruk,
   normalisasiCatatanKirim,
+  segarkanWaktuCetak,
+  sekaliJalan,
   strukHtml,
   STRUK_DEFAULT,
   type DataStruk,
@@ -69,17 +71,24 @@ export const Struk = forwardRef<StrukHandle, Props>(function Struk(
         f.style.border = "0";
         f.srcdoc = doc;
         document.body.appendChild(f);
-        const jalankan = () => {
+        const bersihkan = () => setTimeout(() => f.remove(), 60_000);
+        /* Satu gerbang untuk dua pemicu: `srcdoc` bisa sudah selesai tepat
+           setelah di-append, lalu event `load` menyusul. Tanpa gerbang
+           bersama, struk tercetak dua kali. */
+        const jalankan = sekaliJalan(() => {
           const w = f.contentWindow;
           if (!w) return;
+          segarkanWaktuCetak(f.contentDocument!);
+          w.addEventListener("afterprint", bersihkan, { once: true });
           w.focus();
           w.print();
-          // Beri waktu dialog print selesai, lalu buang frame-nya.
-          setTimeout(() => f.remove(), 1000);
-        };
+        });
         f.addEventListener("load", jalankan, { once: true });
-        // Kalau dokumen sudah selesai sebelum listener dipasang.
-        if (f.contentDocument?.readyState === "complete") setTimeout(jalankan, 0);
+        if (f.contentDocument?.readyState === "complete") {
+          /* srcdoc sering sudah complete setelah appendChild — panggil
+             langsung tanpa nunggu event load. */
+          jalankan();
+        }
       },
     }),
     [doc, setelan.receiptWidth],

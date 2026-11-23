@@ -1,15 +1,19 @@
 import { describe, expect, it } from "vitest";
 
+import { kurirDariTag, petaTag } from "./kurir";
+
 import {
   cssStruk,
   PRINTER_DEFAULT,
   STRUK_DEFAULT,
   formatRupiah,
+  formatWaktuCetak,
   lebarCetakMm,
   lebarLogoCetakPx,
   logoStruk,
   namaItemStruk,
   normalisasiCatatanKirim,
+  segarkanWaktuCetak,
   strukHtml,
   tipografiStruk,
   UKURAN_FONT_STRUK,
@@ -250,6 +254,83 @@ describe("baris kurir di struk", () => {
   it("tidak menampilkan baris kurir kalau undefined", () => {
     const h = rapikan(strukHtml(data({})));
     expect(h).not.toContain("Dikirim oleh");
+  });
+});
+
+describe("pemetaan kurir dari nama customer", () => {
+  const tagUntukNama = petaTag(
+    [
+      { id: "c1", name: "ITS 7/17", tag: "ITS" },
+      { id: "c2", name: "Sutorejo 3/12", tag: "Sutorejo" },
+      { id: "c3", name: "Tanpa Tag", tag: null },
+      { id: "c4", name: "Kenjeran 5", tag: "Kenjeran" },
+    ],
+    [],
+  );
+
+  it("ITS → Raka/Vendi", () => {
+    expect(kurirDariTag(tagUntukNama("ITS 7/17"))).toBe("Raka/Vendi");
+  });
+
+  it("Sutorejo → Yanto", () => {
+    expect(kurirDariTag(tagUntukNama("Sutorejo 3/12"))).toBe("Yanto");
+  });
+
+  it("Kenjeran → Sudes", () => {
+    expect(kurirDariTag(tagUntukNama("Kenjeran 5"))).toBe("Sudes");
+  });
+
+  it("customer tanpa tag → kurir kosong", () => {
+    expect(kurirDariTag(tagUntukNama("Tanpa Tag"))).toBe("");
+  });
+
+  it("nama tak dikenal → kurir kosong", () => {
+    expect(kurirDariTag(tagUntukNama("Orang Asing Jl. Mawar"))).toBe("");
+  });
+});
+
+describe("cetak timestamp di struk", () => {
+  const tgl = new Date(2026, 10, 22, 9, 41); // WIB, month 10 = Nov
+
+  it("menampilkan timestamp dd/mm/yyyy HH.MM tanpa label", () => {
+    const h = rapikan(strukHtml(data(), undefined, tgl));
+    // Harus muncul tepat dengan format itu, tanpa kata "Dicetak"/"Print"/dll.
+    expect(h).toContain("22/11/2026 09.41");
+    // Tidak ada label bahasa apa pun.
+    expect(h).not.toMatch(/Dicetak|Print|Tanggal|Date|Waktu|Time|Printed|Printed on/i);
+  });
+
+  it("letaknya setelah customer dan sebelum antre", () => {
+    const h = rapikan(strukHtml(data({ queueNo: 63 }), undefined, tgl));
+    const idxCustomer = h.indexOf("receipt-customer");
+    const idxTimestamp = h.indexOf("22/11/2026 09.41");
+    const idxQueue = h.indexOf("receipt-queue");
+    expect(idxCustomer).toBeGreaterThan(-1);
+    expect(idxTimestamp).toBeGreaterThan(idxCustomer);
+    expect(idxQueue).toBeGreaterThan(idxTimestamp);
+  });
+
+  it("formatWaktuCetak menghasilkan dd/mm/yyyy HH.MM", () => {
+    expect(formatWaktuCetak(new Date(2026, 0, 15, 8, 0))).toBe("15/01/2026 08.00");
+    expect(formatWaktuCetak(new Date(2026, 10, 22, 9, 41))).toBe("22/11/2026 09.41");
+  });
+
+  it("segarkanWaktuCetak mengubah timestamp build-time ke waktu refresh", async () => {
+  // @ts-expect-error — jsdom tidak punya @types/jsdom, tapi runtime ada.
+  const { JSDOM } = await import("jsdom");
+    const buildTgl = new Date(2026, 0, 15, 8, 0); // 15/01/2026 08.00
+    const refreshTgl = new Date(2026, 10, 22, 9, 41); // 22/11/2026 09.41
+    const html = rapikan(strukHtml(data(), undefined, buildTgl));
+    expect(html).toContain("15/01/2026 08.00");
+    expect(html).not.toContain("22/11/2026 09.41");
+
+    // JSDOM Document juga ParentNode — panggil helper langsung.
+    const doc: ParentNode & { body: { textContent: string | null } } = new JSDOM(html).window.document;
+    segarkanWaktuCetak(doc, refreshTgl);
+    expect(doc.body.textContent).toContain("22/11/2026 09.41");
+    expect(doc.body.textContent).not.toContain("15/01/2026 08.00");
+    // Pastikan tidak ada label yang menyusup
+    expect(doc.body.textContent).not.toMatch(/Dicetak|Print|Printed|Tanggal|Date|Waktu|Time/i);
   });
 });
 

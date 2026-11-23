@@ -17,6 +17,7 @@ import { isHalfVariantName } from "@/lib/pricing";
 import { simpanPesananImpor } from "@/lib/simpan-impor";
 import { AI_BULK_PROMPT, contohCsv } from "@/lib/contoh-impor";
 import { useData } from "@/lib/data-source";
+import { kurirDariTag } from "@/lib/kurir";
 import { cssStruk, strukHtml } from "@/lib/struk";
 import { cetakStruk, gabungStruk } from "@/lib/cetak-struk";
 import { useSetelan } from "@/lib/setelan";
@@ -429,6 +430,7 @@ export function ImporPesananPage() {
         lineTotal: i.qty * i.harga,
         note: i.catatan,
       })),
+      kurir: kurirDariTag(data.tagUntukNama(p.customer)),
     });
 
   /* "Proses + Cetak Semua": struk yang baru tersimpan langsung dikirim ke

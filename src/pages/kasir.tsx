@@ -16,6 +16,7 @@ import { saranCustomer } from "@/lib/cocok-customer";
 import { customerDepositUntuk } from "@/lib/deposit-customer";
 import { triggerSyncFromSheet } from "@/lib/sync-google-sheet";
 import { rapikanCatatan, ringkasCatatan } from "@/lib/catatan-item";
+import { kurirDariTag } from "@/lib/kurir";
 import { cssStruk, strukHtml, type DataStruk } from "@/lib/struk";
 import { PageHeader, btnGhost, btnPrimary, inputClass } from "@/components/ui/kit";
 import { Pill } from "@/components/ui/card";
@@ -125,6 +126,7 @@ export function KasirPage() {
     total: hasil.struk.total,
     items: hasil.struk.items,
     usedDeposit: hasil.struk.usedDeposit,
+    kurir: kurirDariTag(live.tagUntukNama(hasil.struk.customer || "")),
   });
 
   const say = (text: string, tone: "ok" | "warn" = "ok") => {

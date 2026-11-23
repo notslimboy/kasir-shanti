@@ -1,6 +1,7 @@
 import {
   cssStruk,
   lebarCetakMm,
+  segarkanWaktuCetak,
   strukHtml,
   tipografiStruk,
   STRUK_DEFAULT,
@@ -151,6 +152,7 @@ export async function cetakStruk(
     doc.write(dokumenCetak(list, tinggiMm, setelan));
     doc.close();
     await tungguSiap(frame);
+    segarkanWaktuCetak(doc);
     return true;
   };
 

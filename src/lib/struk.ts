@@ -177,14 +177,54 @@ export function namaItemStruk(item: ItemStruk): string {
 }
 
 /* -------------------------------------------------------------------------
+   Cetak timestamp helper
+   ---------------------------------------------------------------------- */
+
+/** Format Date ke dd/mm/yyyy HH.MM (WIB — . bukan :). */
+export function formatWaktuCetak(t: Date): string {
+  const dd = String(t.getDate()).padStart(2, "0");
+  const mm = String(t.getMonth() + 1).padStart(2, "0");
+  const yyyy = t.getFullYear();
+  const hh = String(t.getHours()).padStart(2, "0");
+  const min = String(t.getMinutes()).padStart(2, "0");
+  return `${dd}/${mm}/${yyyy} ${hh}.${min}`;
+}
+
+/** Ganti teks semua `[data-cetak-at]` di dalam dokumen dengan waktu sekarang
+ *  (atau `now` kalau dikasih). Panggil sesaat sebelum `w.print()`. */
+export function segarkanWaktuCetak(container: ParentNode, now?: Date): void {
+  const teks = formatWaktuCetak(now ?? new Date());
+  container.querySelectorAll("[data-cetak-at]").forEach((el) => {
+    el.textContent = teks;
+  });
+}
+
+/** Bungkus aksi supaya hanya pernah jalan satu kali.
+ *
+ * Dipakai `cetak()` di komponen Struk: iframe `srcdoc` bisa sudah
+ * `readyState === "complete"` tepat setelah di-append, lalu event `load`
+ * tetap menyusul. Dua jalur itu harus berbagi satu gerbang, kalau tidak
+ * struk tercetak dua kali. */
+export function sekaliJalan(aksi: () => void): () => void {
+  let sudah = false;
+  return () => {
+    if (sudah) return;
+    sudah = true;
+    aksi();
+  };
+}
+
+/* -------------------------------------------------------------------------
    Bentuk struk — urutan baris WAJIB sama
    ---------------------------------------------------------------------- */
 
 /**
  * Menghasilkan HTML struk. Mengembalikan string, bukan JSX, supaya yang
  * dicetak ke printer dan yang tampil di pratinjau benar-benar objek yang sama.
+ *
+ * @param now — untuk test: timestamp cetak tetap, default new Date().
  */
-export function strukHtml(data: DataStruk, setelan: SetelanStruk = STRUK_DEFAULT): string {
+export function strukHtml(data: DataStruk, setelan: SetelanStruk = STRUK_DEFAULT, now?: Date): string {
   const lebar = data.receiptWidth ?? setelan.receiptWidth;
   const kompak = (data.receiptMode ?? setelan.receiptMode) === "compact";
   const namaToko = data.storeName || setelan.storeName;
@@ -199,6 +239,9 @@ export function strukHtml(data: DataStruk, setelan: SetelanStruk = STRUK_DEFAULT
   const catatan = normalisasiCatatanKirim(data.sendNote);
   const antre = data.queueNo === null || data.queueNo === undefined ? "" : String(data.queueNo).trim();
 
+  /* Cetak timestamp — hanya tanggal & jam, tanpa label. */
+  const cetakStr = formatWaktuCetak(now ?? new Date());
+
   const header = `
     <header class="receipt-header receipt-center${kompak ? " receipt-compact-header" : ""}">
       <img class="receipt-logo" src="${logoStruk(lebar)}" alt="Logo Shanti Catering">
@@ -211,6 +254,8 @@ export function strukHtml(data: DataStruk, setelan: SetelanStruk = STRUK_DEFAULT
     customer
       ? `<div class="receipt-info receipt-customer"><strong class="receipt-customer-name">${escapeHtml(customer)}</strong></div>`
       : "",
+    /* Cetak timestamp — setelah customer, sebelum antre/catatan kirim. */
+    `<div class="receipt-info receipt-small receipt-center" data-cetak-at="">${escapeHtml(cetakStr)}</div>`,
     kurir
       ? `<div class="receipt-info receipt-kurir"><strong>Dikirim oleh: ${escapeHtml(kurir)}</strong></div>`
       : "",
