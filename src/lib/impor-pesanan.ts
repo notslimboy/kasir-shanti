@@ -138,12 +138,16 @@ function bukanAngka(v: string): boolean {
 }
 
 /** "28/5/2026 10.15" → { tanggal: "2026-05-28", jam: "10:15" }.
+    Juga menerima detik ("22/11/2026 18.46.35"), karena instruksi_ai_parser.md
+    mewajibkan format `dd/mm/yyyy HH.MM.SS`. Tanpa `(?:[.:](\d{2}))?` regex-nya
+    menangkap "46.35" sebagai jam — jamnya hilang dan `keCompletedAt` menerima
+    jam 46, yang menggeser struk ke hari lain.
     Port normalizeQueueDate (script.js:5787) + pemisahan jamnya. */
 export function parseTanggal(v: string): { tanggal: string; jam: string } {
   const raw = String(v ?? "").trim();
   if (!raw) return { tanggal: "", jam: "" };
 
-  const jamCocok = raw.match(/(\d{1,2})[.:](\d{2})$/);
+  const jamCocok = raw.match(/(\d{1,2})[.:](\d{2})(?:[.:](\d{2}))?$/);
   const jam = jamCocok ? `${jamCocok[1].padStart(2, "0")}:${jamCocok[2]}` : "";
   const bagianTanggal = (jamCocok ? raw.slice(0, jamCocok.index) : raw).trim();
 

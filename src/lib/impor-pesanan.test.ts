@@ -174,6 +174,15 @@ describe("parseTanggal", () => {
     expect(parseTanggal("28/5/2026 10.15")).toEqual({ tanggal: "2026-05-28", jam: "10:15" });
   });
 
+  it("format dengan detik tidak menghilangkan jam", () => {
+    // instruksi_ai_parser.md mewajibkan dd/mm/yyyy HH.MM.SS. Regex lama
+    // menangkap "46.35" dan menjadikannya jam, sehingga tanggal 22/11 jam
+    // 18.46 tercatat sebagai jam 46 pada tanggal yang sama.
+    expect(parseTanggal("22/11/2026 18.46.35")).toEqual({ tanggal: "2026-11-22", jam: "18:46" });
+    expect(parseTanggal("23/11/2026 02.23.29")).toEqual({ tanggal: "2026-11-23", jam: "02:23" });
+    expect(parseTanggal("23/11/2026 02.23.29").jam).not.toBe("23:29");
+  });
+
   it("format ISO", () => {
     expect(parseTanggal("2026-05-28")).toEqual({ tanggal: "2026-05-28", jam: "" });
   });
