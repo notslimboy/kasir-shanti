@@ -19,9 +19,9 @@ const ROUTE: { path: string; nav: string; mobile: boolean }[] = [
   { path: "/penjualan", nav: "Struk", mobile: true },
   { path: "/customer", nav: "Customer", mobile: true },
   { path: "/piutang", nav: "Piutang", mobile: true },
-  { path: "/itsfood-dashboard", nav: "Dasbor Itsfood", mobile: true },
-  { path: "/itsfood-orders", nav: "Order Itsfood", mobile: true },
-  { path: "/itsfood-tagihan", nav: "Payment Itsfood", mobile: true },
+  { path: "/itsfood-dashboard", nav: "Dasbor", mobile: true },
+  { path: "/itsfood-orders", nav: "Order", mobile: true },
+  { path: "/itsfood-tagihan", nav: "Payment", mobile: true },
   { path: "/pengaturan", nav: "Pengaturan", mobile: true },
   { path: "/impor", nav: "Import Pesanan", mobile: false }, // desktop only
 ];
